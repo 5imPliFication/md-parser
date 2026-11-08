@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="A fast, private Markdown parser that runs entirely in your browser."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <title>md-parser — Markdown, parsed locally</title>
+    <script>
+      (() => {
+        try {
+          const stored = localStorage.getItem('md-parser-theme');
+          const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          document.documentElement.dataset.theme = stored || (dark ? 'dark' : 'light');
+        } catch {
+          document.documentElement.dataset.theme = 'light';
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <header class="app-header">
+      <a class="brand" href="/" aria-label="md-parser home">
+        <span class="brand-mark" aria-hidden="true">#</span>
+        <span class="brand-name">md-parser</span>
+      </a>
+      <p class="tagline">Markdown, parsed locally.</p>
+      <button id="theme-toggle" class="button button-quiet" type="button">Dark mode</button>
+    </header>
+
+    <main class="workspace">
+      <section class="pane editor-pane" aria-labelledby="editor-title">
+        <div class="pane-header">
+          <h1 id="editor-title" class="pane-title">Markdown</h1>
+          <div class="pane-actions">
+            <button id="load-sample" class="button" type="button">Sample</button>
+            <button id="clear" class="button" type="button">Clear</button>
+          </div>
+        </div>
+        <label class="sr-only" for="editor">Markdown source</label>
+        <textarea
+          id="editor"
+          class="editor"
+          spellcheck="false"
+          autocomplete="off"
+          autocapitalize="off"
+          placeholder="Type or paste Markdown here…"
+        ></textarea>
+        <div class="pane-footer">
+          <span id="stats" class="stats">0 words · 0 chars · 0 min read</span>
+          <span class="hint">Drop a .md file anywhere</span>
+        </div>
+      </section>
+
+      <section class="pane preview-pane" aria-labelledby="preview-title">
+        <div class="pane-header">
+          <div class="tabs" role="tablist" aria-label="Output view">
+            <button
+              id="tab-preview"
+              class="tab is-active"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              aria-controls="preview"
+            >
+              Preview
+            </button>
+            <button
+              id="tab-html"
+              class="tab"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="html-output"
+            >
+              HTML
+            </button>
+          </div>
+          <div class="pane-actions">
+            <button id="copy-html" class="button" type="button">Copy HTML</button>
+            <button id="download-html" class="button button-accent" type="button">
+              Download
+            </button>
+          </div>
+        </div>
+        <h2 id="preview-title" class="sr-only">Rendered preview</h2>
+        <article id="preview" class="markdown-body" role="tabpanel" aria-labelledby="tab-preview"></article>
+        <pre
+          id="html-output"
+          class="html-output"
+          role="tabpanel"
+          aria-labelledby="tab-html"
+          hidden
+        ><code></code></pre>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <span>Private by design: nothing leaves your browser.</span>
+      <a href="https://github.com/5imPliFication/md-parser" rel="noopener noreferrer">
+        Source
+      </a>
+    </footer>
+
+    <div id="drop-overlay" class="drop-overlay" hidden>
+      <div class="drop-card">
+        <span class="drop-mark" aria-hidden="true">#</span>
+        <p>Drop a Markdown file to open it</p>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
