@@ -9,15 +9,23 @@
       content="A fast, private Markdown parser that runs entirely in your browser."
     />
     <meta name="color-scheme" content="light dark" />
-    <title>md-parser — Markdown, parsed locally</title>
+    <title>Markdown Parser</title>
     <script>
       (() => {
         try {
-          const stored = localStorage.getItem('md-parser-theme');
+          const storedTheme = localStorage.getItem('md-parser-theme');
           const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          document.documentElement.dataset.theme = stored || (dark ? 'dark' : 'light');
+          document.documentElement.dataset.theme = storedTheme || (dark ? 'dark' : 'light');
+
+          const rawSettings = localStorage.getItem('md-parser-settings');
+          const settings = rawSettings ? JSON.parse(rawSettings) : {};
+          const layouts = ['writing', 'split', 'cinematic'];
+          document.documentElement.dataset.layout = layouts.includes(settings.layout)
+            ? settings.layout
+            : 'split';
         } catch {
           document.documentElement.dataset.theme = 'light';
+          document.documentElement.dataset.layout = 'split';
         }
       })();
     </script>
@@ -29,7 +37,104 @@
         <span class="brand-name">md-parser</span>
       </a>
       <p class="tagline">Markdown, parsed locally.</p>
-      <button id="theme-toggle" class="button button-quiet" type="button">Dark mode</button>
+
+      <div class="header-actions">
+        <div class="menu">
+          <button
+            id="export-toggle"
+            class="button button-accent"
+            type="button"
+            aria-expanded="false"
+            aria-haspopup="menu"
+          >
+            Export
+          </button>
+          <div id="export-menu" class="popover menu-list" role="menu" aria-label="Export" hidden>
+            <button class="menu-item" type="button" role="menuitem" data-export="md">
+              <span>Markdown</span><span class="ext">.md</span>
+            </button>
+            <button class="menu-item" type="button" role="menuitem" data-export="html">
+              <span>HTML</span><span class="ext">.html</span>
+            </button>
+            <button class="menu-item" type="button" role="menuitem" data-export="pdf">
+              <span>PDF</span><span class="ext">.pdf</span>
+            </button>
+            <button class="menu-item" type="button" role="menuitem" data-export="doc">
+              <span>Word document</span><span class="ext">.doc</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="menu">
+          <button
+            id="settings-toggle"
+            class="button button-quiet"
+            type="button"
+            aria-expanded="false"
+            aria-haspopup="dialog"
+          >
+            Settings
+          </button>
+          <div
+            id="settings-panel"
+            class="popover settings-panel"
+            role="dialog"
+            aria-label="Settings"
+            hidden
+          >
+            <div class="setting-group">
+              <p class="setting-heading">View</p>
+              <label class="choice">
+                <input type="radio" name="layout" value="writing" />
+                <span class="choice-text">
+                  <span class="setting-label">Writing mode</span>
+                  <span class="setting-hint">Editor only</span>
+                </span>
+              </label>
+              <label class="choice">
+                <input type="radio" name="layout" value="split" />
+                <span class="choice-text">
+                  <span class="setting-label">Preview mode</span>
+                  <span class="setting-hint">Editor and preview side by side</span>
+                </span>
+              </label>
+              <label class="choice">
+                <input type="radio" name="layout" value="cinematic" />
+                <span class="choice-text">
+                  <span class="setting-label">Cinematic mode</span>
+                  <span class="setting-hint">Preview only</span>
+                </span>
+              </label>
+            </div>
+
+            <div class="setting-group">
+              <p class="setting-heading">Behavior</p>
+              <div class="setting-row">
+                <span class="choice-text">
+                  <span class="setting-label">Synchronize scrolling</span>
+                  <span class="setting-hint">Keep editor and preview aligned</span>
+                </span>
+                <label class="switch" aria-label="Synchronize scrolling">
+                  <input id="sync-scroll" type="checkbox" />
+                  <span class="switch-track" aria-hidden="true"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="setting-group">
+              <p class="setting-heading">Theme</p>
+              <div class="segmented" role="group" aria-label="Theme">
+                <button id="theme-light" class="segment" type="button" aria-pressed="false">
+                  Light
+                </button>
+                <button id="theme-dark" class="segment" type="button" aria-pressed="false">
+                  Dark
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </header>
 
     <main class="workspace">
@@ -42,16 +147,20 @@
           </div>
         </div>
         <label class="sr-only" for="editor">Markdown source</label>
-        <textarea
-          id="editor"
-          class="editor"
-          spellcheck="false"
-          autocomplete="off"
-          autocapitalize="off"
-          placeholder="Type or paste Markdown here…"
-        ></textarea>
+        <div class="editor-shell">
+          <div id="line-numbers" class="line-numbers" aria-hidden="true">1</div>
+          <textarea
+            id="editor"
+            class="editor"
+            spellcheck="false"
+            autocomplete="off"
+            autocapitalize="off"
+            wrap="off"
+            placeholder="Type or paste Markdown here…"
+          ></textarea>
+        </div>
         <div class="pane-footer">
-          <span id="stats" class="stats">0 words · 0 chars · 0 min read</span>
+          <span id="stats" class="stats">0 words · 0 chars · ~0 B · 0 lines · 0 min read</span>
           <span class="hint">Drop a .md file anywhere</span>
         </div>
       </section>
@@ -82,13 +191,15 @@
           </div>
           <div class="pane-actions">
             <button id="copy-html" class="button" type="button">Copy HTML</button>
-            <button id="download-html" class="button button-accent" type="button">
-              Download
-            </button>
           </div>
         </div>
         <h2 id="preview-title" class="sr-only">Rendered preview</h2>
-        <article id="preview" class="markdown-body" role="tabpanel" aria-labelledby="tab-preview"></article>
+        <article
+          id="preview"
+          class="markdown-body"
+          role="tabpanel"
+          aria-labelledby="tab-preview"
+        ></article>
         <pre
           id="html-output"
           class="html-output"

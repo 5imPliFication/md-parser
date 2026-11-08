@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildStandaloneHtml, escapeHtml, getDocumentTitle, slugify } from './export';
+import {
+  buildDocHtml,
+  buildStandaloneHtml,
+  escapeHtml,
+  getDocumentTitle,
+  slugify,
+} from './export';
 
 describe('escapeHtml', () => {
   it('escapes HTML-sensitive characters', () => {
@@ -42,5 +48,38 @@ describe('buildStandaloneHtml', () => {
 
     expect(html).toContain('<h1>Body</h1>');
     expect(html).toContain('<!doctype html>');
+  });
+});
+
+describe('buildDocHtml', () => {
+  it('escapes the document title', () => {
+    const html = buildDocHtml('</title><script>alert(1)</script>', '<p>Body</p>');
+
+    expect(html).not.toContain('</title><script>');
+    expect(html).toContain('&lt;/title&gt;&lt;script&gt;');
+  });
+
+  it('produces a Word-compatible document with the body content', () => {
+    const html = buildDocHtml('Title', '<h1>Body</h1>');
+
+    expect(html).toContain('urn:schemas-microsoft-com:office:word');
+    expect(html).toContain('<h1>Body</h1>');
+    expect(html).toContain('@page');
+  });
+});
+
+describe('syntax styling in exports', () => {
+  it('includes token colors in the standalone HTML', () => {
+    const html = buildStandaloneHtml('Title', '<pre><code class="hljs language-css">.x {}</code></pre>');
+
+    expect(html).toContain('.hljs-keyword');
+    expect(html).toContain('.hljs-string');
+  });
+
+  it('includes token colors in the Word document', () => {
+    const html = buildDocHtml('Title', '<pre><code class="hljs language-css">.x {}</code></pre>');
+
+    expect(html).toContain('.hljs-keyword');
+    expect(html).toContain('.hljs-string');
   });
 });
