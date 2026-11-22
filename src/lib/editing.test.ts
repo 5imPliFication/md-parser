@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Edit } from './editing';
-import { continueList, indent, outdent, toggleWrap } from './editing';
+import {
+  continueList,
+  findTaskMarkers,
+  indent,
+  outdent,
+  setTaskChecked,
+  toggleWrap,
+} from './editing';
 
 /** Applies an edit; `|` marks the caret and `[ ]` a selection in the result. */
 function apply(value: string, edit: Edit | null): string {
@@ -131,5 +138,57 @@ describe('continueList', () => {
   it('leaves Enter alone inside fenced code', () => {
     expect(run(continueList, '```\n- not a list|')).toBe('NULL');
     expect(run(continueList, '```\ncode\n```\n- list|')).toBe('```\ncode\n```\n- list\n- |');
+  });
+});
+
+describe('findTaskMarkers', () => {
+  const source = [
+    '- [ ] one', // marker at 3
+    '* [x] two',
+    '1. [X] three',
+    '- not a task',
+    '- [y] not a task either',
+    '```',
+    '- [ ] inside code',
+    '```',
+    '> - [ ] quoted',
+    '  - [ ] nested',
+    '-[ ] no space',
+  ].join('\n');
+
+  it('finds markers in order, skipping code and non-tasks', () => {
+    const chars = findTaskMarkers(source).map((at) => source.slice(at - 1, at + 2));
+    expect(chars).toEqual(['[ ]', '[x]', '[X]', '[ ]', '[ ]']);
+  });
+
+  it('handles CRLF-free empty input', () => {
+    expect(findTaskMarkers('')).toEqual([]);
+  });
+});
+
+describe('setTaskChecked', () => {
+  const source = '- [ ] a\n- [x] b';
+
+  it('checks and unchecks the matching task', () => {
+    const check = setTaskChecked(source, 0, true, 2);
+    expect(check && source.slice(0, check.start) + check.text + source.slice(check.end)).toBe(
+      '- [x] a\n- [x] b',
+    );
+    const uncheck = setTaskChecked(source, 1, false, 2);
+    expect(uncheck && source.slice(0, uncheck.start) + uncheck.text + source.slice(uncheck.end)).toBe(
+      '- [ ] a\n- [ ] b',
+    );
+  });
+
+  it('refuses when the task count does not match the preview', () => {
+    expect(setTaskChecked(source, 0, true, 3)).toBeNull();
+  });
+
+  it('refuses when the task is already in the requested state', () => {
+    expect(setTaskChecked(source, 1, true, 2)).toBeNull();
+  });
+
+  it('refuses an out-of-range index', () => {
+    expect(setTaskChecked(source, 5, true, 2)).toBeNull();
   });
 });

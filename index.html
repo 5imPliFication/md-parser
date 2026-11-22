@@ -9,6 +9,9 @@
       content="A fast, private Markdown parser that runs entirely in your browser."
     />
     <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f2f1ee" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0f0f11" media="(prefers-color-scheme: dark)" />
+    <link rel="apple-touch-icon" href="/pwa-192.png" />
     <title>Markdown Parser</title>
     <script>
       (() => {
@@ -29,10 +32,15 @@
             ? settings.layout
             : 'split';
           document.documentElement.dataset.wrap = settings.wrap === false ? 'off' : 'on';
+          // On narrow screens the outline is a drawer; never open it on load.
+          const narrow = window.matchMedia('(max-width: 900px)').matches;
+          document.documentElement.dataset.outline =
+            settings.outline === true && !narrow ? 'on' : 'off';
         } catch {
           document.documentElement.dataset.theme = 'light';
           document.documentElement.dataset.layout = 'split';
           document.documentElement.dataset.wrap = 'on';
+          document.documentElement.dataset.outline = 'off';
         }
       })();
     </script>
@@ -40,9 +48,21 @@
   <body>
     <header class="app-header">
       <a class="brand" href="/" aria-label="md-parser home">
-        <span class="brand-mark" aria-hidden="true">#</span>
+        <span class="brand-mark" aria-hidden="true">
+          <img src="/public/favicon.svg"/>
+        </span>
         <span class="brand-name">md-parser</span>
       </a>
+      <button
+        id="outline-toggle"
+        class="button button-quiet outline-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="outline-sidebar"
+        title="Toggle outline"
+      >
+        Outline
+      </button>
       <p class="tagline">Markdown, parsed locally.</p>
 
       <div class="header-actions">
@@ -128,6 +148,16 @@
               </div>
               <div class="setting-row">
                 <span class="choice-text">
+                  <span class="setting-label">Keep line breaks</span>
+                  <span class="setting-hint">Off joins lines into paragraphs, like GitHub</span>
+                </span>
+                <label class="switch" aria-label="Keep line breaks">
+                  <input id="line-breaks" type="checkbox" />
+                  <span class="switch-track" aria-hidden="true"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <span class="choice-text">
                   <span class="setting-label">Wrap long lines</span>
                   <span class="setting-hint">Line numbers show when off</span>
                 </span>
@@ -158,6 +188,17 @@
     </header>
 
     <main class="workspace">
+      <aside id="outline-sidebar" class="pane outline-sidebar" aria-labelledby="outline-title">
+        <div class="pane-header">
+          <h2 id="outline-title" class="pane-title">Outline</h2>
+          <button id="outline-close" class="button" type="button" aria-label="Hide outline">
+            Hide
+          </button>
+        </div>
+        <nav class="outline-nav" aria-labelledby="outline-title">
+          <ol id="outline-list" class="outline-list"></ol>
+        </nav>
+      </aside>
       <section class="pane editor-pane" aria-labelledby="editor-title">
         <div class="pane-header">
           <h1 id="editor-title" class="pane-title">Markdown</h1>

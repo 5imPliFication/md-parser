@@ -165,3 +165,63 @@ export function continueList(value: string, selStart: number, selEnd: number): E
     selectionEnd: selStart + text.length,
   };
 }
+
+const QUOTE_PREFIX = /^(?: {0,3}>[ ]?)*/;
+const TASK_ITEM = /^(\s*(?:[-*+]|\d{1,9}[.)])\s+)\[([ xX])\](?=\s|$)/;
+
+/**
+ * Offsets of the state character inside each task-list marker (`[ ]`/`[x]`),
+ * in document order, skipping fenced code. Includes tasks in blockquotes.
+ */
+export function findTaskMarkers(source: string): number[] {
+  const markers: number[] = [];
+  let offset = 0;
+  let inFence = false;
+
+  for (const line of source.split('\n')) {
+    const quote = QUOTE_PREFIX.exec(line)?.[0] ?? '';
+    const body = line.slice(quote.length);
+
+    if (FENCE.test(body)) {
+      inFence = !inFence;
+    } else if (!inFence) {
+      const match = TASK_ITEM.exec(body);
+      if (match) {
+        markers.push(offset + quote.length + (match[1]?.length ?? 0) + 1);
+      }
+    }
+
+    offset += line.length + 1;
+  }
+
+  return markers;
+}
+
+/**
+ * Sets the `index`-th task to `checked`. Returns null unless the source has
+ * exactly `expectedCount` tasks and that task is currently in the opposite
+ * state, so a click can never flip the wrong line.
+ */
+export function setTaskChecked(
+  source: string,
+  index: number,
+  checked: boolean,
+  expectedCount: number,
+): Edit | null {
+  const markers = findTaskMarkers(source);
+  if (markers.length !== expectedCount) return null;
+
+  const at = markers[index];
+  if (at === undefined) return null;
+
+  const isChecked = source[at] !== ' ';
+  if (isChecked === checked) return null;
+
+  return {
+    start: at,
+    end: at + 1,
+    text: checked ? 'x' : ' ',
+    selectionStart: at + 1,
+    selectionEnd: at + 1,
+  };
+}

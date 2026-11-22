@@ -152,7 +152,7 @@ a {
   place-items: center;
   width: 26px;
   height: 26px;
-  background: var(--invert-bg);
+  background: var(--bg-sunken);
   color: var(--invert-fg);
   font-family: var(--mono);
   font-size: 15px;
@@ -282,6 +282,67 @@ a {
   font-weight: 500;
   text-align: left;
   cursor: pointer;
+}
+
+.outline-list {
+  margin: 0;
+  padding: 6px 0;
+  list-style: none;
+}
+
+.outline-item {
+  display: block;
+  width: 100%;
+  padding: 6px 12px 6px calc(12px + var(--depth, 0) * 14px);
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.outline-item[aria-current="location"] {
+  border-left-color: var(--accent);
+  color: var(--ink-strong);
+  font-weight: 600;
+}
+
+.outline-item:hover {
+  border-left-color: var(--accent);
+  background: var(--bg-sunken);
+}
+
+.outline-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.outline-empty {
+  padding: 8px 12px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Brief flag on the heading an outline item or in-page link jumped to. */
+.markdown-body .is-target {
+  animation: target-flash 1.2s ease-out;
+}
+
+@keyframes target-flash {
+  from {
+    background: var(--accent-soft);
+  }
+  to {
+    background: transparent;
+  }
 }
 
 .menu-item:last-child {
@@ -470,6 +531,43 @@ a {
 html[data-layout="writing"] .workspace,
 html[data-layout="cinematic"] .workspace {
   grid-template-columns: minmax(0, 1fr);
+}
+
+/* Collapsible outline sidebar: an extra first column when open. */
+.workspace {
+  --sidebar-width: clamp(200px, 17vw, 280px);
+}
+
+html[data-outline="on"] .workspace {
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) minmax(0, 1fr);
+}
+
+html[data-outline="on"][data-layout="writing"] .workspace,
+html[data-outline="on"][data-layout="cinematic"] .workspace {
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+}
+
+/* Scoped under .workspace so the later `.pane { display: flex }` can't win. */
+.workspace > .outline-sidebar {
+  display: none;
+  border-right: 1px solid var(--line);
+  background: var(--bg);
+}
+
+html[data-outline="on"] .workspace > .outline-sidebar {
+  display: flex;
+}
+
+.outline-nav {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.outline-toggle[aria-expanded="true"] {
+  border-color: var(--line-strong);
+  color: var(--ink-strong);
 }
 
 html[data-layout="writing"] .preview-pane,
@@ -730,6 +828,15 @@ html[data-wrap="on"] .line-numbers {
   vertical-align: middle;
 }
 
+.markdown-body input.task-checkbox:not(:disabled) {
+  cursor: pointer;
+}
+
+.markdown-body input.task-checkbox:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .markdown-body a {
   color: var(--accent);
   text-underline-offset: 0.16em;
@@ -891,6 +998,50 @@ html[data-wrap="on"] .line-numbers {
   max-width: 100%;
   height: auto;
   border-radius: 0;
+}
+
+/* Math (KaTeX). Unrendered placeholders show the TeX in mono. */
+.markdown-body .math-inline:not([data-rendered]),
+.markdown-body .math-display:not([data-rendered]) {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+.markdown-body .math-display {
+  margin: 1.4em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+}
+
+/* Diagrams (Mermaid) sit on a light card in both themes: Mermaid bakes its
+   colours into the SVG, and this keeps print/export output identical. */
+.markdown-body .mermaid-diagram {
+  margin: 1.5em 0;
+}
+
+.markdown-body .mermaid-diagram[data-rendered]:not([data-error]) {
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.markdown-body .mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.markdown-body .diagram-error {
+  margin: 0 0 -1px;
+  padding: 8px 12px;
+  border: 1px solid var(--syntax-deletion);
+  background: transparent;
+  color: var(--syntax-deletion);
+  font-size: 11px;
+  white-space: pre-wrap;
 }
 
 .markdown-body hr {
@@ -1088,8 +1239,20 @@ html[data-wrap="on"] .line-numbers {
     width: 100%;
   }
 
-  .workspace {
+  .workspace,
+  html[data-outline="on"] .workspace,
+  html[data-outline="on"][data-layout] .workspace {
     grid-template-columns: 1fr;
+  }
+
+  /* Narrow screens: the outline is a drawer over the content. */
+  .workspace > .outline-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 50;
+    width: min(300px, 86vw);
+    border-right: 1px solid var(--line-strong);
+    background: var(--bg-raised);
   }
 
   .editor-pane {
@@ -1208,6 +1371,7 @@ html[data-wrap="on"] .line-numbers {
 
   .app-header,
   .app-footer,
+  .outline-sidebar,
   .editor-pane,
   .pane-header,
   .html-output,
@@ -1244,6 +1408,8 @@ html[data-wrap="on"] .line-numbers {
   }
 
   .markdown-body pre,
+  .markdown-body .mermaid-diagram,
+  .markdown-body .math-display,
   .markdown-body table,
   .markdown-body img,
   .markdown-body blockquote,

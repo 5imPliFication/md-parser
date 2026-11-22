@@ -5,7 +5,7 @@ describe('renderMarkdown', () => {
   it('renders headings and paragraphs', () => {
     const html = renderMarkdown('# Hello\n\nA paragraph.');
 
-    expect(html).toContain('<h1>Hello</h1>');
+    expect(html).toContain('<h1 id="user-content-hello">Hello</h1>');
     expect(html).toContain('<p>A paragraph.</p>');
   });
 
@@ -161,5 +161,74 @@ describe('renderMarkdown with source lines', () => {
 
   it('leaves the plain output free of markers', () => {
     expect(renderMarkdown(source)).not.toContain('data-source-line');
+  });
+});
+
+describe('heading anchors', () => {
+  it('gives headings prefixed GitHub-style ids', () => {
+    const html = renderMarkdown('# Hello **World**!\n\n## Tiêu đề 2');
+    expect(html).toContain('<h1 id="user-content-hello-world">');
+    expect(html).toContain('<h2 id="user-content-tiêu-đề-2">');
+  });
+
+  it('keeps ids that collide with document properties', () => {
+    expect(renderMarkdown('## Title\n\n## Links')).toContain('id="user-content-title"');
+    expect(renderMarkdown('## Links')).toContain('id="user-content-links"');
+  });
+
+  it('numbers duplicate headings and resets per document', () => {
+    const html = renderMarkdown('## Notes\n\n## Notes\n\n## Notes');
+    expect(html).toContain('id="user-content-notes"');
+    expect(html).toContain('id="user-content-notes-1"');
+    expect(html).toContain('id="user-content-notes-2"');
+    expect(renderMarkdown('## Notes')).toContain('id="user-content-notes"');
+  });
+
+  it('numbers duplicates across blocks when rendering with source lines', () => {
+    const html = renderMarkdown('## A\n\ntext\n\n## A', { sourceLines: true });
+    expect(html).toContain('id="user-content-a-1"');
+  });
+
+  it('decodes entities before slugging', () => {
+    expect(renderMarkdown('## Q&A `<tips>`')).toContain('id="user-content-qa-tips"');
+  });
+
+  it('rewrites in-page links to the prefixed ids and keeps them in the page', () => {
+    const html = renderMarkdown('[Jump](#title)');
+    expect(html).toContain('href="#user-content-title"');
+    expect(html).not.toContain('target=');
+  });
+
+  it('leaves already prefixed and external links alone', () => {
+    expect(renderMarkdown('[x](#user-content-a)')).toContain('href="#user-content-a"');
+    expect(renderMarkdown('[x](https://a.dev/#b)')).toContain('target="_blank"');
+  });
+});
+
+describe('line breaks option', () => {
+  const source = 'first line\nsecond line';
+
+  it('renders single line breaks as <br> by default', () => {
+    expect(renderMarkdown(source)).toContain('first line<br>second line');
+  });
+
+  it('joins lines into one paragraph GitHub-style when breaks is false', () => {
+    const html = renderMarkdown(source, { breaks: false });
+    expect(html).not.toContain('<br>');
+    expect(html).toContain('<p>first line\nsecond line</p>');
+  });
+
+  it('applies to the source-line path and keeps the custom renderer', () => {
+    const html = renderMarkdown(`## Head\n\n${source}\n\n- [ ] task`, {
+      sourceLines: true,
+      breaks: false,
+    });
+    expect(html).not.toContain('<br>');
+    expect(html).toContain('id="user-content-head"');
+    expect(html).toContain('class="task-checkbox"');
+  });
+
+  it('honours an explicit trailing-backslash break either way', () => {
+    expect(renderMarkdown('a\\\nb', { breaks: false })).toContain('<br>');
   });
 });

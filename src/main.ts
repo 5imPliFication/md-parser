@@ -5,13 +5,14 @@ import {
   getDocumentTitle,
   slugify,
 } from './lib/export';
-import { SOURCE_LINE_ATTR, renderMarkdown } from './lib/markdown';
+import { SOURCE_LINE_ATTR, needsEnhancement, renderMarkdown } from './lib/markdown';
 import type { ScrollMap } from './lib/scrollmap';
 import { buildScrollMap, invertScrollMap, mapScroll } from './lib/scrollmap';
 import { countLines, estimateSize } from './lib/stats';
+import { registerSW } from 'virtual:pwa-register';
 import { SAMPLE_MARKDOWN } from './data/sample';
 import type { Edit } from './lib/editing';
-import { continueList, indent, outdent, toggleWrap } from './lib/editing';
+import { continueList, indent, outdent, setTaskChecked, toggleWrap } from './lib/editing';
 import { FILE_ACCEPT, checkFile, looksBinary } from './lib/files';
 
 const DRAFT_KEY = 'md-parser-draft';
@@ -27,12 +28,16 @@ interface Settings {
   syncScroll: boolean;
   layout: Layout;
   wrap: boolean;
+  outline: boolean;
+  breaks: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
   syncScroll: true,
   layout: 'split',
   wrap: true,
+  outline: false,
+  breaks: true,
 };
 
 function required<T extends Element>(selector: string): T {
@@ -62,8 +67,21 @@ const settingsToggle = required<HTMLButtonElement>('#settings-toggle');
 const settingsPanel = required<HTMLElement>('#settings-panel');
 const exportToggle = required<HTMLButtonElement>('#export-toggle');
 const exportMenu = required<HTMLElement>('#export-menu');
+const outlineToggle = required<HTMLButtonElement>('#outline-toggle');
+const outlineSidebar = required<HTMLElement>('#outline-sidebar');
+const outlineNav = required<HTMLElement>('.outline-nav');
+const outlineClose = required<HTMLButtonElement>('#outline-close');
+const outlineList = required<HTMLOListElement>('#outline-list');
+const narrowScreen = window.matchMedia('(max-width: 900px)');
+
+/** Toggle button + panel pairs that behave as popovers. */
+const POPOVERS = [
+  { button: settingsToggle, panel: settingsPanel },
+  { button: exportToggle, panel: exportMenu },
+];
 const syncScrollToggle = required<HTMLInputElement>('#sync-scroll');
 const wrapToggle = required<HTMLInputElement>('#wrap-lines');
+const breaksToggle = required<HTMLInputElement>('#line-breaks');
 const themeButtons = Array.from(
   document.querySelectorAll<HTMLButtonElement>('[data-theme-choice]'),
 );
@@ -114,6 +132,8 @@ function loadSettings(): Settings {
       syncScroll: parsed.syncScroll !== false,
       layout,
       wrap: parsed.wrap !== false,
+      outline: parsed.outline === true,
+      breaks: parsed.breaks !== false,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -127,9 +147,12 @@ function saveSettings(): void {
 function applySettings(persist = true): void {
   document.documentElement.dataset.layout = settings.layout;
   document.documentElement.dataset.wrap = settings.wrap ? 'on' : 'off';
+  document.documentElement.dataset.outline = settings.outline ? 'on' : 'off';
+  outlineToggle.setAttribute('aria-expanded', String(settings.outline));
   editor.wrap = settings.wrap ? 'soft' : 'off';
   syncScrollToggle.checked = settings.syncScroll;
   wrapToggle.checked = settings.wrap;
+  breaksToggle.checked = settings.breaks;
 
   for (const input of layoutInputs) {
     input.checked = input.value === settings.layout;
@@ -144,6 +167,10 @@ function applySettings(persist = true): void {
 
   if (settings.layout === 'split' && view === 'preview') {
     window.requestAnimationFrame(() => syncScroll(editor, preview));
+  }
+
+  if (settings.outline) {
+    buildOutline();
   }
 }
 
@@ -175,14 +202,71 @@ function updateLineNumbers(source = editor.value): void {
 const SOURCE_LINE_MARKER = new RegExp(`(<[a-zA-Z][\\w-]*) ${SOURCE_LINE_ATTR}="\\d+"`, 'g');
 
 function render(source: string): void {
-  const previewHtml = renderMarkdown(source, { sourceLines: true });
+  const previewHtml = renderMarkdown(source, { sourceLines: true, breaks: settings.breaks });
   preview.innerHTML = previewHtml;
   // Copy/export get clean HTML without the scroll-sync markers.
   html = previewHtml.replace(SOURCE_LINE_MARKER, '$1');
+  renderGeneration += 1;
+  runEnhancements(renderGeneration);
   invalidateScrollMap();
+  enableTaskCheckboxes();
+  if (settings.outline) buildOutline();
   htmlCode.textContent = html || '<!-- Nothing to render yet -->';
   updateStats(source);
   updateLineNumbers(source);
+}
+
+// --- Lazy math & diagrams -------------------------------------------------
+
+type EnhanceModule = typeof import('./lib/enhance');
+let enhanceModule: EnhanceModule | null = null;
+let renderGeneration = 0;
+
+function loadEnhanceModule(): Promise<EnhanceModule> {
+  return import('./lib/enhance').then((module) => (enhanceModule = module));
+}
+
+/** Content moved (math/diagrams sized in): refresh scroll sync and outline. */
+function afterEnhance(generation: number): void {
+  if (generation !== renderGeneration) return;
+  invalidateScrollMap();
+  scheduleOutlineUpdate();
+  // Show the portable HTML (MathML/SVG) in the HTML tab.
+  void enhanceModule?.finalizeHtml(html).then((finalHtml) => {
+    if (generation === renderGeneration) htmlCode.textContent = finalHtml;
+  });
+}
+
+function runEnhancements(generation: number): void {
+  if (!needsEnhancement(html)) return;
+
+  if (!enhanceModule) {
+    void loadEnhanceModule().then(() => {
+      if (generation === renderGeneration) runEnhancements(generation);
+    });
+    return;
+  }
+
+  const pending = enhanceModule.enhance(preview);
+  if (pending) {
+    void pending.then(() => afterEnhance(generation));
+  } else {
+    afterEnhance(generation);
+  }
+}
+
+/** HTML for Copy HTML and exports, with math/diagrams made portable. */
+async function exportableHtml(): Promise<string> {
+  if (!needsEnhancement(html)) return html;
+  const module = enhanceModule ?? (await loadEnhanceModule());
+  return module.finalizeHtml(html);
+}
+
+/** Waits until the live preview has its math and diagrams (for printing). */
+async function previewEnhanced(): Promise<void> {
+  if (!needsEnhancement(html)) return;
+  const module = enhanceModule ?? (await loadEnhanceModule());
+  await module.enhance(preview);
 }
 
 function scheduleRender(): void {
@@ -205,7 +289,7 @@ function hideToast(): void {
   toastElement.classList.remove('is-visible', 'has-action');
 }
 
-function toast(message: string, action?: ToastAction): void {
+function toast(message: string, action?: ToastAction, durationMs?: number): void {
   const text = document.createElement('span');
   text.textContent = message;
   toastElement.replaceChildren(text);
@@ -225,7 +309,7 @@ function toast(message: string, action?: ToastAction): void {
 
   toastElement.classList.add('is-visible');
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(hideToast, action ? 6000 : 2200);
+  toastTimer = window.setTimeout(hideToast, durationMs ?? (action ? 6000 : 2200));
 }
 
 function setView(next: View): void {
@@ -238,6 +322,8 @@ function setView(next: View): void {
   tabHtml.classList.toggle('is-active', !isPreview);
   tabPreview.setAttribute('aria-selected', String(isPreview));
   tabHtml.setAttribute('aria-selected', String(!isPreview));
+
+  scheduleOutlineUpdate();
 
   if (isPreview) {
     invalidateScrollMap();
@@ -279,6 +365,7 @@ let scrollMap: ScrollMap | null = null;
 
 function invalidateScrollMap(): void {
   scrollMap = null;
+  headingEditorTops = null;
 }
 
 function paddingTop(element: HTMLElement): number {
@@ -443,21 +530,23 @@ function exportMarkdown(): void {
   toast('Markdown downloaded');
 }
 
-function exportHtml(): void {
+async function exportHtml(): Promise<void> {
   const title = getDocumentTitle(editor.value);
+  const body = await exportableHtml();
   downloadFile(
     `${exportBaseName()}.html`,
-    buildStandaloneHtml(title, html),
+    buildStandaloneHtml(title, body),
     'text/html;charset=utf-8',
   );
   toast('HTML downloaded');
 }
 
-function exportDoc(): void {
+async function exportDoc(): Promise<void> {
   const title = getDocumentTitle(editor.value);
+  const body = await exportableHtml();
   downloadFile(
     `${exportBaseName()}.doc`,
-    `\ufeff${buildDocHtml(title, html)}`,
+    `\ufeff${buildDocHtml(title, body)}`,
     'application/msword;charset=utf-8',
   );
   toast('Word document downloaded');
@@ -486,6 +575,7 @@ async function exportPdf(): Promise<void> {
   // The preview must hold the latest source, even mid-debounce.
   window.clearTimeout(renderTimer);
   render(editor.value);
+  await previewEnhanced();
   await loadPreviewImages();
 
   // Browsers use document.title as the default "Save as PDF" filename.
@@ -504,10 +594,10 @@ async function exportPdf(): Promise<void> {
 }
 
 function closePopovers(): void {
-  settingsPanel.hidden = true;
-  settingsToggle.setAttribute('aria-expanded', 'false');
-  exportMenu.hidden = true;
-  exportToggle.setAttribute('aria-expanded', 'false');
+  for (const { button, panel } of POPOVERS) {
+    panel.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+  }
 }
 
 function togglePopover(button: HTMLButtonElement, panel: HTMLElement): void {
@@ -526,16 +616,235 @@ function togglePopover(button: HTMLButtonElement, panel: HTMLElement): void {
 
 /** Closes an open popover and returns focus to its toggle button. */
 function dismissPopover(): boolean {
-  const open = [
-    { button: settingsToggle, panel: settingsPanel },
-    { button: exportToggle, panel: exportMenu },
-  ].find(({ panel }) => !panel.hidden);
+  const open = POPOVERS.find(({ panel }) => !panel.hidden);
 
   if (!open) return false;
 
   closePopovers();
   open.button.focus();
   return true;
+}
+
+function taskCheckboxes(): HTMLInputElement[] {
+  return Array.from(preview.querySelectorAll<HTMLInputElement>('input.task-checkbox'));
+}
+
+/** Task boxes render disabled (as in exports); make them usable in the preview. */
+function enableTaskCheckboxes(): void {
+  for (const box of taskCheckboxes()) {
+    box.disabled = false;
+    const label = box.closest('li')?.textContent?.trim().slice(0, 80);
+    box.setAttribute('aria-label', label ? `Task: ${label}` : 'Task');
+  }
+}
+
+/** Ticks a task in the source (undoable), keeping both panes where they were. */
+function toggleTask(box: HTMLInputElement): void {
+  const boxes = taskCheckboxes();
+  const index = boxes.indexOf(box);
+  const edit = setTaskChecked(editor.value, index, box.checked, boxes.length);
+
+  if (!edit) {
+    toast("Couldn't match this checkbox to the source");
+    return;
+  }
+
+  const editorScroll = editor.scrollTop;
+  const previewScroll = preview.scrollTop;
+  const { selectionStart, selectionEnd } = editor;
+
+  editor.focus({ preventScroll: true });
+  applyEdit(edit);
+  editor.setSelectionRange(selectionStart, selectionEnd);
+  editor.scrollTop = editorScroll;
+
+  window.clearTimeout(renderTimer);
+  render(editor.value);
+  preview.scrollTop = previewScroll;
+  // Don't let the restored editor scroll re-sync (and nudge) the preview.
+  scrollLock = preview;
+  window.clearTimeout(scrollLockTimer);
+  scrollLockTimer = window.setTimeout(() => {
+    scrollLock = null;
+  }, 120);
+  taskCheckboxes()[index]?.focus({ preventScroll: true });
+}
+
+function findPreviewTarget(id: string): HTMLElement | null {
+  if (!id) return null;
+  return preview.querySelector<HTMLElement>(`[id="${CSS.escape(id)}"]`);
+}
+
+function previewHeadings(): HTMLHeadingElement[] {
+  return Array.from(
+    preview.querySelectorAll<HTMLHeadingElement>('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]'),
+  );
+}
+
+/** 0-based source line a rendered element came from (via its block). */
+function sourceLineOf(element: HTMLElement): number | null {
+  const block = element.closest<HTMLElement>(`[${SOURCE_LINE_ATTR}]`);
+  return block ? Number(block.getAttribute(SOURCE_LINE_ATTR)) : null;
+}
+
+/** Lists the preview's headings in the outline sidebar. */
+function buildOutline(): void {
+  const headings = previewHeadings();
+  const minLevel = Math.min(...headings.map((heading) => Number(heading.tagName[1])));
+
+  outlineList.replaceChildren(
+    ...headings.map((heading) => {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'outline-item';
+      button.dataset.headingId = heading.id;
+      button.style.setProperty('--depth', String(Number(heading.tagName[1]) - minLevel));
+      button.textContent = heading.textContent?.trim() || 'Untitled';
+      item.append(button);
+      return item;
+    }),
+  );
+
+  if (headings.length === 0) {
+    const empty = document.createElement('li');
+    empty.className = 'outline-empty';
+    empty.textContent = 'No headings yet';
+    outlineList.append(empty);
+  }
+
+  outlineActiveId = null;
+  updateActiveOutline();
+}
+
+function previewVisible(): boolean {
+  return settings.layout !== 'writing' && view === 'preview';
+}
+
+function previewScrollsInternally(): boolean {
+  return preview.scrollHeight > preview.clientHeight + 1;
+}
+
+// Editor offsets of heading lines, for tracking the current section while
+// the preview is hidden. Shares invalidation with the scroll map.
+let headingEditorTops: { id: string; top: number }[] | null = null;
+
+/** Id of the heading whose section is at the top of the visible pane. */
+function currentHeadingId(): string | null {
+  const headings = previewHeadings();
+  if (headings.length === 0) return null;
+
+  if (previewVisible()) {
+    const reference = previewScrollsInternally()
+      ? preview.getBoundingClientRect().top + paddingTop(preview)
+      : 0;
+    let current = headings[0];
+    for (const heading of headings) {
+      if (heading.getBoundingClientRect().top - reference > 8) break;
+      current = heading;
+    }
+    return current?.id ?? null;
+  }
+
+  if (!headingEditorTops) {
+    const withLines = headings
+      .map((heading) => ({ id: heading.id, line: sourceLineOf(heading) }))
+      .filter((entry): entry is { id: string; line: number } => entry.line !== null);
+    const tops = editorLineTops(withLines.map((entry) => entry.line));
+    headingEditorTops = withLines.map((entry, index) => ({
+      id: entry.id,
+      top: (tops[index] ?? 0) - paddingTop(editor),
+    }));
+  }
+
+  let current = headingEditorTops[0]?.id ?? null;
+  for (const entry of headingEditorTops) {
+    if (entry.top - editor.scrollTop > 4) break;
+    current = entry.id;
+  }
+  return current;
+}
+
+let outlineActiveId: string | null = null;
+let outlineFrame = 0;
+
+/** Marks the current section in the outline and keeps it in view. */
+function updateActiveOutline(): void {
+  if (!settings.outline) return;
+
+  const id = currentHeadingId();
+  if (id === outlineActiveId) return;
+  outlineActiveId = id;
+
+  for (const item of outlineList.querySelectorAll<HTMLElement>('.outline-item')) {
+    const active = item.dataset.headingId === id;
+    if (active) {
+      item.setAttribute('aria-current', 'location');
+      const itemTop = item.offsetTop - outlineNav.offsetTop;
+      if (itemTop < outlineNav.scrollTop || itemTop + item.offsetHeight > outlineNav.scrollTop + outlineNav.clientHeight) {
+        outlineNav.scrollTop = itemTop - outlineNav.clientHeight / 3;
+      }
+    } else {
+      item.removeAttribute('aria-current');
+    }
+  }
+}
+
+function scheduleOutlineUpdate(): void {
+  if (!settings.outline || outlineFrame) return;
+  outlineFrame = window.requestAnimationFrame(() => {
+    outlineFrame = 0;
+    updateActiveOutline();
+  });
+}
+
+function setOutlineOpen(open: boolean): void {
+  settings.outline = open;
+  applySettings();
+}
+
+/**
+ * Brings a heading (or any preview element) into view: in the preview when it
+ * is showing (the editor follows via sync), otherwise in the editor.
+ */
+function revealHeading(element: HTMLElement): void {
+  const line = sourceLineOf(element);
+
+  if (settings.layout === 'writing') {
+    if (line === null) return;
+    const top = (editorLineTops([line])[0] ?? 0) - paddingTop(editor);
+    editor.scrollTop = Math.max(0, top);
+    const offset = editor.value.split('\n').slice(0, line).join('\n').length + (line ? 1 : 0);
+    editor.focus({ preventScroll: true });
+    editor.setSelectionRange(offset, offset);
+    updateLineNumbers();
+    scheduleOutlineUpdate();
+    return;
+  }
+
+  if (view !== 'preview') setView('preview');
+
+  const elementTop = element.getBoundingClientRect().top;
+
+  if (previewScrollsInternally()) {
+    preview.scrollTop = Math.max(
+      0,
+      elementTop - preview.getBoundingClientRect().top + preview.scrollTop - paddingTop(preview),
+    );
+  } else {
+    // Stacked (narrow) layout: the page scrolls, not the preview pane.
+    window.scrollTo({ top: Math.max(0, window.scrollY + elementTop - 12) });
+  }
+
+  // Without scroll sync, still bring the source into view in the editor.
+  if (!settings.syncScroll && line !== null && settings.layout === 'split') {
+    editor.scrollTop = (editorLineTops([line])[0] ?? 0) - paddingTop(editor);
+  }
+
+  element.classList.remove('is-target');
+  void element.offsetWidth;
+  element.classList.add('is-target');
+  scheduleOutlineUpdate();
 }
 
 function setSource(source: string): void {
@@ -633,6 +942,58 @@ exportToggle.addEventListener('click', (event) => {
   togglePopover(exportToggle, exportMenu);
 });
 
+outlineToggle.addEventListener('click', (event) => {
+  event.stopPropagation();
+  setOutlineOpen(!settings.outline);
+  if (settings.outline && narrowScreen.matches) {
+    outlineList.querySelector<HTMLElement>('.outline-item')?.focus();
+  }
+});
+
+outlineClose.addEventListener('click', () => {
+  setOutlineOpen(false);
+  outlineToggle.focus();
+});
+
+outlineList.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+
+  const item = target.closest<HTMLButtonElement>('[data-heading-id]');
+  const heading = item && findPreviewTarget(item.dataset.headingId ?? '');
+  if (!heading) return;
+
+  // On narrow screens the outline is a drawer covering the content.
+  if (narrowScreen.matches) setOutlineOpen(false);
+  revealHeading(heading);
+});
+
+// In-page links (`[x](#section)`, footnotes) scroll the preview instead of
+// changing the app's URL. Task checkboxes edit the source.
+preview.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+
+  if (target instanceof HTMLInputElement && target.classList.contains('task-checkbox')) {
+    // The box re-renders from the edited source; don't let it flip on its own.
+    event.preventDefault();
+    toggleTask(target);
+    return;
+  }
+
+  const link = target.closest<HTMLAnchorElement>('a[href^="#"]');
+  if (!link) return;
+
+  event.preventDefault();
+  const id = decodeURIComponent(link.getAttribute('href')?.slice(1) ?? '');
+  const destination = findPreviewTarget(id);
+  if (destination) {
+    revealHeading(destination);
+  } else {
+    toast('Link target not found');
+  }
+});
+
 document.addEventListener('click', (event) => {
   const target = event.target;
   if (target instanceof Element && target.closest('.menu')) {
@@ -643,10 +1004,7 @@ document.addEventListener('click', (event) => {
 
 // Tabbing out of an open popover closes that popover (only that one, so
 // moving focus into another menu's freshly opened panel keeps it open).
-for (const { button, panel } of [
-  { button: settingsToggle, panel: settingsPanel },
-  { button: exportToggle, panel: exportMenu },
-]) {
+for (const { button, panel } of POPOVERS) {
   const menu = button.closest<HTMLElement>('.menu');
   menu?.addEventListener('focusout', (event) => {
     const next = event.relatedTarget;
@@ -658,16 +1016,47 @@ for (const { button, panel } of [
 }
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && dismissPopover()) {
+  if (event.key !== 'Escape') return;
+
+  if (dismissPopover()) {
     event.preventDefault();
+  } else if (narrowScreen.matches && settings.outline) {
+    event.preventDefault();
+    setOutlineOpen(false);
+    outlineToggle.focus();
   }
 });
+
+document.addEventListener('click', (event) => {
+  const target = event.target;
+  if (
+    narrowScreen.matches &&
+    settings.outline &&
+    target instanceof Node &&
+    !outlineSidebar.contains(target) &&
+    !outlineToggle.contains(target)
+  ) {
+    setOutlineOpen(false);
+  }
+});
+
+// Track the current section as either pane scrolls.
+preview.addEventListener('scroll', scheduleOutlineUpdate, { passive: true });
+editor.addEventListener('scroll', scheduleOutlineUpdate, { passive: true });
+window.addEventListener('scroll', scheduleOutlineUpdate, { passive: true });
 
 wrapToggle.addEventListener('change', () => {
   settings.wrap = wrapToggle.checked;
   applySettings();
   updateLineNumbers();
   toast(settings.wrap ? 'Line wrap on' : 'Line wrap off');
+});
+
+breaksToggle.addEventListener('change', () => {
+  settings.breaks = breaksToggle.checked;
+  applySettings();
+  render(editor.value);
+  toast(settings.breaks ? 'Line breaks kept' : 'Lines join into paragraphs');
 });
 
 syncScrollToggle.addEventListener('change', () => {
@@ -805,7 +1194,7 @@ tabHtml.addEventListener('click', () => setView('html'));
 
 copyButton.addEventListener('click', async () => {
   try {
-    await copyText(html);
+    await copyText(await exportableHtml());
     toast('HTML copied to clipboard');
   } catch {
     toast('Copy failed — open the HTML tab and copy manually');
@@ -826,13 +1215,13 @@ exportMenu.addEventListener('click', (event) => {
       exportMarkdown();
       break;
     case 'html':
-      exportHtml();
+      void exportHtml();
       break;
     case 'pdf':
       void exportPdf();
       break;
     case 'doc':
-      exportDoc();
+      void exportDoc();
       break;
   }
 });
@@ -915,8 +1304,10 @@ window.addEventListener('storage', (event) => {
   }
 
   if (event.key === SETTINGS_KEY || event.key === null) {
+    const breaksBefore = settings.breaks;
     settings = loadSettings();
     applySettings(false);
+    if (settings.breaks !== breaksBefore) render(editor.value);
   }
 
   if (event.key === DRAFT_KEY && event.newValue !== null) {
@@ -952,6 +1343,30 @@ const initialSource = safeGet(DRAFT_KEY);
 const initial = initialSource !== null ? initialSource : SAMPLE_MARKDOWN;
 
 editor.value = initial;
+// Offline support. The service worker only exists in production builds; an
+// update waits for the user so a draft is never interrupted by a reload.
+const updateServiceWorker = registerSW({
+  onNeedRefresh() {
+    toast(
+      'A new version is available',
+      {
+        label: 'Reload',
+        run: () => {
+          window.clearTimeout(saveTimer);
+          safeSet(DRAFT_KEY, editor.value);
+          void updateServiceWorker(true);
+        },
+      },
+      30000,
+    );
+  },
+  onOfflineReady() {
+    toast('Ready to work offline');
+  },
+});
+
+// The narrow-screen outline drawer starts closed regardless of the setting.
+if (narrowScreen.matches) settings.outline = false;
 render(initial);
 applySettings(false);
 applyTheme(loadThemeChoice());
