@@ -299,114 +299,44 @@ function exportDoc(): void {
   toast('Word document downloaded');
 }
 
+async function loadPreviewImages(timeoutMs = 3000): Promise<void> {
+  const images = Array.from(preview.querySelectorAll('img'));
+  if (images.length === 0) return;
+
+  for (const image of images) {
+    image.loading = 'eager';
+  }
+
+  await Promise.race([
+    Promise.allSettled(images.map((image) => image.decode())),
+    new Promise((resolve) => window.setTimeout(resolve, timeoutMs)),
+  ]);
+}
+
 async function exportPdf(): Promise<void> {
   if (!editor.value.trim()) {
     toast('Nothing to export yet');
     return;
   }
 
-  const originalLabel = exportToggle.textContent;
-  exportToggle.disabled = true;
-  exportToggle.textContent = 'Exporting…';
-  toast('Preparing PDF…');
+  // The preview must hold the latest source, even mid-debounce.
+  window.clearTimeout(renderTimer);
+  render(editor.value);
+  await loadPreviewImages();
 
-  try {
-    const [{ jsPDF }, { default: html2canvas }] = await Promise.all([
-      import('jspdf'),
-      import('html2canvas'),
-    ]);
+  // Browsers use document.title as the default "Save as PDF" filename.
+  const appTitle = document.title;
+  document.title = exportBaseName();
+  window.addEventListener(
+    'afterprint',
+    () => {
+      document.title = appTitle;
+    },
+    { once: true },
+  );
 
-    const container = document.createElement('div');
-    const clone = preview.cloneNode(true) as HTMLElement;
-
-    container.className = 'pdf-export';
-    clone.removeAttribute('id');
-    clone.removeAttribute('role');
-    clone.removeAttribute('aria-labelledby');
-    clone.removeAttribute('hidden');
-    container.append(clone);
-    document.body.append(container);
-
-    let canvas: HTMLCanvasElement;
-
-    try {
-      await document.fonts?.ready;
-      await new Promise<void>((resolve) => {
-        window.requestAnimationFrame(() => resolve());
-      });
-      canvas = await html2canvas(clone, {
-        scale: 2,
-        backgroundColor: '#ffffff',
-        useCORS: true,
-        logging: false,
-      });
-    } finally {
-      container.remove();
-    }
-
-    const pdf = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' });
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = 36;
-    const contentWidth = pageWidth - margin * 2;
-    const contentHeight = pageHeight - margin * 2;
-    const pixelsPerPoint = canvas.width / contentWidth;
-    const pageContentHeight = Math.floor(contentHeight * pixelsPerPoint);
-
-    let offset = 0;
-    let pageIndex = 0;
-
-    while (offset < canvas.height) {
-      const sliceHeight = Math.min(pageContentHeight, canvas.height - offset);
-      const pageCanvas = document.createElement('canvas');
-      const context = pageCanvas.getContext('2d');
-
-      if (!context) {
-        throw new Error('Could not create the PDF canvas');
-      }
-
-      pageCanvas.width = canvas.width;
-      pageCanvas.height = sliceHeight;
-      context.fillStyle = '#ffffff';
-      context.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-      context.drawImage(
-        canvas,
-        0,
-        offset,
-        canvas.width,
-        sliceHeight,
-        0,
-        0,
-        canvas.width,
-        sliceHeight,
-      );
-
-      if (pageIndex > 0) {
-        pdf.addPage();
-      }
-
-      pdf.addImage(
-        pageCanvas.toDataURL('image/png'),
-        'PNG',
-        margin,
-        margin,
-        contentWidth,
-        sliceHeight / pixelsPerPoint,
-      );
-
-      offset += sliceHeight;
-      pageIndex += 1;
-    }
-
-    pdf.save(`${exportBaseName()}.pdf`);
-    toast('PDF downloaded');
-  } catch (error) {
-    console.error(error);
-    toast('PDF export failed');
-  } finally {
-    exportToggle.disabled = false;
-    exportToggle.textContent = originalLabel;
-  }
+  toast('Choose "Save as PDF" in the print dialog');
+  window.print();
 }
 
 function closePopovers(): void {
@@ -587,6 +517,26 @@ window.addEventListener('drop', async (event) => {
   } catch {
     toast('Could not read that file');
   }
+});
+
+// Collapsed <details> would print only their summary, so expand them for the
+// print (Export → PDF or Ctrl+P) and restore the reader's state afterwards.
+let detailsOpenedForPrint: HTMLDetailsElement[] = [];
+
+window.addEventListener('beforeprint', () => {
+  detailsOpenedForPrint = Array.from(
+    preview.querySelectorAll<HTMLDetailsElement>('details:not([open])'),
+  );
+  for (const details of detailsOpenedForPrint) {
+    details.open = true;
+  }
+});
+
+window.addEventListener('afterprint', () => {
+  for (const details of detailsOpenedForPrint) {
+    details.open = false;
+  }
+  detailsOpenedForPrint = [];
 });
 
 const initialSource = safeGet(DRAFT_KEY);

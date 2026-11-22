@@ -1020,93 +1020,6 @@ html[data-layout="cinematic"] .preview-pane {
   transform: translateY(0);
 }
 
-.pdf-export {
-  position: fixed;
-  top: 0;
-  left: -10000px;
-  width: 794px;
-  padding: 0;
-  background: #ffffff;
-  color: #101014;
-  color-scheme: light;
-  --bg: #ffffff;
-  --bg-raised: #f7f6f3;
-  --bg-sunken: #ecebe7;
-  --ink: #101014;
-  --ink-strong: #000000;
-  --muted: #5b5b60;
-  --faint: #737378;
-  --line: #d8d7d2;
-  --line-strong: #a8a7a1;
-  --accent: #1f6feb;
-  --accent-ink: #1659c4;
-  --accent-soft: #eaf2ff;
-  --code-bg: #f3f0e9;
-  --code-ink: #24221f;
-  --syntax-comment: #6a737d;
-  --syntax-keyword: #d73a49;
-  --syntax-string: #032f62;
-  --syntax-number: #005cc5;
-  --syntax-title: #6f42c1;
-  --syntax-variable: #e36209;
-  --syntax-type: #22863a;
-  --syntax-tag: #22863a;
-  --syntax-attr: #005cc5;
-  --syntax-meta: #e36209;
-  --syntax-deletion: #d73a49;
-  --syntax-addition: #22863a;
-}
-
-.pdf-export .markdown-body {
-  overflow: visible;
-  max-width: none;
-  padding: 0;
-  background: #ffffff;
-  color: #101014;
-  font-family: var(--sans);
-}
-
-.pdf-export .markdown-body h1,
-.pdf-export .markdown-body h2,
-.pdf-export .markdown-body h3,
-.pdf-export .markdown-body h4,
-.pdf-export .markdown-body h5,
-.pdf-export .markdown-body h6 {
-  letter-spacing: 0;
-}
-
-.pdf-export .markdown-body blockquote {
-  background: #f2f5fb;
-  color: #4f5157;
-}
-
-.pdf-export .markdown-body :not(pre) > code {
-  background: #ecebe7;
-}
-
-.pdf-export .markdown-body pre {
-  background: #f3f0e9;
-  color: #24221f;
-  border-color: #d8d2c5;
-}
-
-.pdf-export .markdown-body pre code {
-  background: transparent;
-  color: inherit;
-}
-
-.pdf-export .markdown-body th {
-  background: #f0efeb;
-}
-
-.pdf-export .markdown-body tr:nth-child(even) td {
-  background: #f8f7f4;
-}
-
-.pdf-export .markdown-body a {
-  color: #1f6feb;
-}
-
 @media (max-width: 900px) {
   html,
   body {
@@ -1196,7 +1109,44 @@ html[data-layout="cinematic"] .preview-pane {
   }
 }
 
+@page {
+  size: A4;
+  margin: 18mm 16mm;
+}
+
 @media print {
+  /* Printed output is always a light document, whatever the app theme. */
+  html,
+  html[data-theme="dark"] {
+    color-scheme: light;
+    --bg: #ffffff;
+    --bg-raised: #f7f6f3;
+    --bg-sunken: #ecebe7;
+    --ink: #101014;
+    --ink-strong: #000000;
+    --muted: #4f5157;
+    --faint: #737378;
+    --line: #d8d7d2;
+    --line-strong: #a8a7a1;
+    --accent: #1f6feb;
+    --accent-ink: #1659c4;
+    --accent-soft: #f2f5fb;
+    --code-bg: #f3f0e9;
+    --code-ink: #24221f;
+    --syntax-comment: #6a737d;
+    --syntax-keyword: #d73a49;
+    --syntax-string: #032f62;
+    --syntax-number: #005cc5;
+    --syntax-title: #6f42c1;
+    --syntax-variable: #e36209;
+    --syntax-type: #22863a;
+    --syntax-tag: #22863a;
+    --syntax-attr: #005cc5;
+    --syntax-meta: #e36209;
+    --syntax-deletion: #d73a49;
+    --syntax-addition: #22863a;
+  }
+
   html,
   body {
     height: auto;
@@ -1204,22 +1154,27 @@ html[data-layout="cinematic"] .preview-pane {
     background: #ffffff;
   }
 
+  body {
+    display: block;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
   .app-header,
   .app-footer,
   .editor-pane,
   .pane-header,
+  .html-output,
   .drop-overlay,
   .toast {
     display: none !important;
   }
 
-  .workspace {
-    display: block;
-    border: 0;
-  }
-
+  .workspace,
   .preview-pane {
     display: block !important;
+    max-width: none;
+    overflow: visible;
     border: 0;
   }
 
@@ -1227,14 +1182,46 @@ html[data-layout="cinematic"] .preview-pane {
     display: block !important;
     overflow: visible;
     padding: 0;
-    color: #000000;
+    color: var(--ink);
+    font-size: 11pt;
   }
 
-  .html-output {
-    display: none !important;
+  .markdown-body h1,
+  .markdown-body h2,
+  .markdown-body h3,
+  .markdown-body h4,
+  .markdown-body h5,
+  .markdown-body h6 {
+    letter-spacing: 0;
+    break-after: avoid;
+    page-break-after: avoid;
   }
 
-  .markdown-body a {
-    color: #000000;
+  .markdown-body pre,
+  .markdown-body table,
+  .markdown-body img,
+  .markdown-body blockquote,
+  .markdown-body details,
+  .markdown-body tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .markdown-body p,
+  .markdown-body li {
+    orphans: 3;
+    widows: 3;
+  }
+
+  /* Code that would scroll on screen wraps on paper instead of being clipped. */
+  .markdown-body pre {
+    overflow: visible;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .markdown-body pre code {
+    background: transparent;
+    color: inherit;
   }
 }

@@ -10,7 +10,7 @@ A fast, private Markdown parser that runs entirely in your browser. Paste or dro
 - Line-numbered editor with an approximate UTF-8 file size alongside word, line, and reading-time stats
 - Writing, split preview, and cinematic view modes
 - Toggleable synchronized scrolling between editor and preview
-- Export as Markdown, HTML, PDF, or Word (`.doc`); PDF output is forced to a light document theme
+- Export as Markdown, HTML, PDF, or Word (`.doc`); PDF uses the browser's print dialog ("Save as PDF") with a light, paginated print stylesheet, so text stays selectable and links keep working
 - HTML source view and clipboard copy
 - Drag-and-drop `.md` file loading (2 MB limit)
 - Local draft and settings persistence via `localStorage`
@@ -42,7 +42,7 @@ npx vitest run -t "removes script tags"
 | Path | Purpose |
 | --- | --- |
 | `index.html` | Static shell, UI markup, and pre-paint theme bootstrap |
-| `src/main.ts` | UI wiring, view modes, draft storage, tabs, drag-and-drop, export actions, PDF generation |
+| `src/main.ts` | UI wiring, view modes, draft storage, tabs, drag-and-drop, export actions, print-to-PDF |
 | `src/lib/markdown.ts` | `marked` + `highlight.js` rendering and `dompurify` sanitization |
 | `src/lib/export.ts` | Title extraction, slugification, standalone HTML and Word `.doc` builders |
 | `src/lib/stats.ts` | Line counting and approximate UTF-8 file size |
