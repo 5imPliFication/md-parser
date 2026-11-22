@@ -4,17 +4,22 @@ A fast, private Markdown parser that runs entirely in your browser. Paste or dro
 
 ## Features
 
-- GitHub Flavored Markdown via `marked` (tables, task lists, strikethrough, autolinks)
+- GitHub Flavored Markdown via `marked` (tables, task lists, strikethrough, autolinks); single line breaks are kept by default, or can join into paragraphs like GitHub
+- Math with `$inline$` and `$$display$$` (KaTeX) and ```` ```mermaid ```` diagrams, both loaded only when a document uses them; exports carry portable MathML and inline SVG
 - Syntax highlighting for Java, JavaScript, TypeScript, Python, Bash, HTML, CSS, C, C++, C#, and Go
 - HTML sanitized with `dompurify` before it reaches the preview
-- Line-numbered editor with an approximate UTF-8 file size alongside word, line, and reading-time stats
+- Editor keys: Tab/Shift+Tab indent and nest list items, Enter continues lists, Ctrl/Cmd+B and +I toggle bold/italic, Ctrl/Cmd+S downloads the `.md` (Escape then Tab leaves the editor)
+- Soft-wrapping editor (toggle off to get a line-number gutter) with an approximate UTF-8 file size alongside word, line, and reading-time stats
 - Writing, split preview, and cinematic view modes
-- Toggleable synchronized scrolling between editor and preview
-- Export as Markdown, HTML, PDF, or Word (`.doc`); PDF output is forced to a light document theme
+- Toggleable synchronized scrolling, anchored per block (headings, code, images stay aligned instead of drifting)
+- Export as Markdown, HTML, PDF, or Word (`.doc`); PDF uses the browser's print dialog ("Save as PDF") with a light, paginated print stylesheet, so text stays selectable and links keep working
+- Heading anchors (GitHub-style `user-content-` ids, Unicode-aware) with a collapsible Outline sidebar that tracks the current section (a drawer on narrow screens); `[link](#heading)` jumps within the preview and keeps working in exported HTML
+- Clickable task-list checkboxes in the preview that tick `[ ]`/`[x]` in the source (undoable; exports keep them static)
 - HTML source view and clipboard copy
-- Drag-and-drop `.md` file loading (2 MB limit)
+- Open or drag-and-drop Markdown/text files (2 MB limit); binary files are rejected, and replacing the draft can be undone
+- Works offline as an installable PWA: the app shell is precached, math/diagram libraries are cached after first use, and updates wait for a "Reload" click so drafts are never interrupted
 - Local draft and settings persistence via `localStorage`
-- Light and dark themes, responsive flat design, print styles
+- Light, dark, and system-following themes, responsive flat design, print styles
 
 ## Development
 
@@ -42,10 +47,17 @@ npx vitest run -t "removes script tags"
 | Path | Purpose |
 | --- | --- |
 | `index.html` | Static shell, UI markup, and pre-paint theme bootstrap |
-| `src/main.ts` | UI wiring, view modes, draft storage, tabs, drag-and-drop, export actions, PDF generation |
+| `src/main.ts` | UI wiring, view modes, draft storage, tabs, drag-and-drop, export actions, print-to-PDF |
 | `src/lib/markdown.ts` | `marked` + `highlight.js` rendering and `dompurify` sanitization |
 | `src/lib/export.ts` | Title extraction, slugification, standalone HTML and Word `.doc` builders |
 | `src/lib/stats.ts` | Line counting and approximate UTF-8 file size |
+| `src/lib/files.ts` | File-type and size checks for opened/dropped files, file-picker `accept` list |
+| `src/lib/editing.ts` | Pure text transforms for editor keys: indent/outdent, bold/italic toggles, list continuation |
+| `src/lib/scrollmap.ts` | Piecewise-linear editor ↔ preview scroll mapping between block anchors |
+| `src/lib/math.ts` | `$…$` / `$$…$$` marked extension emitting escaped TeX placeholders |
+| `src/lib/enhance.ts` | Lazy KaTeX/Mermaid rendering for the preview, and MathML/SVG finalization for exports |
+| `vite.config.ts` | Build config: PWA (manifest, service worker precache/runtime caching) and the chunk-size limit for Mermaid's lazy chunks |
+| `public/pwa-*.png` | App icons for install (rendered from `favicon.svg`) |
 | `src/data/sample.ts` | Sample document shown on first visit |
 | `src/styles/main.css` | Application theme and Markdown preview styles |
 | `src/lib/*.test.ts` | Vitest unit tests |

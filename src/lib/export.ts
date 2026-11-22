@@ -6,6 +6,18 @@ const HTML_ESCAPES: Record<string, string> = {
   "'": '&#39;',
 };
 
+/**
+ * Brand colors for exported documents, matching the app's blue accent
+ * (`--accent` / `--accent-ink` in main.css). Link text uses the darker ink
+ * shade so it stays readable on light paper.
+ */
+export const EXPORT_COLORS = {
+  link: '#1659c4',
+  accent: '#2d81ff',
+  linkDark: '#6aa5ff',
+  accentDark: '#6aa5ff',
+} as const;
+
 export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => HTML_ESCAPES[character] ?? character);
 }
@@ -52,7 +64,7 @@ export function buildDocHtml(title: string, bodyHtml: string): string {
   h1 { font-size: 22pt; }
   h2 { font-size: 17pt; }
   h3 { font-size: 14pt; }
-  a { color: #c24024; }
+  a { color: ${EXPORT_COLORS.link}; }
   code { font-family: Consolas, "Courier New", monospace; font-size: 9.5pt; }
   pre {
     background: #f3f0e9;
@@ -77,7 +89,7 @@ export function buildDocHtml(title: string, bodyHtml: string): string {
   .hljs-emphasis { font-style: italic; }
   .hljs-strong { font-weight: 700; }
   blockquote {
-    border-left: 3pt solid #d94f30;
+    border-left: 3pt solid ${EXPORT_COLORS.accent};
     margin: 12pt 0;
     padding: 4pt 12pt;
     color: #5b564d;
@@ -116,7 +128,7 @@ export function buildStandaloneHtml(title: string, bodyHtml: string): string {
   }
   h1, h2, h3, h4, h5, h6 { line-height: 1.2; margin: 2.2em 0 0.6em; }
   h1 { font-size: 2.2rem; }
-  a { color: #c24024; }
+  a { color: ${EXPORT_COLORS.link}; }
   code, pre {
     font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   }
@@ -138,14 +150,15 @@ export function buildStandaloneHtml(title: string, bodyHtml: string): string {
   .hljs-deletion { color: #d73a49; }
   .hljs-emphasis { font-style: italic; }
   .hljs-strong { font-weight: 700; }
-  blockquote { border-left: 4px solid #e75636; margin: 1.5em 0; padding: 0.2em 1.2em; color: #5b564d; }
+  blockquote { border-left: 4px solid ${EXPORT_COLORS.accent}; margin: 1.5em 0; padding: 0.2em 1.2em; color: #5b564d; }
   table { border-collapse: collapse; width: 100%; }
   th, td { border: 1px solid #d8d2c5; padding: 0.55em 0.75em; text-align: left; }
   img { max-width: 100%; height: auto; }
   hr { border: 0; border-top: 1px solid #d8d2c5; margin: 2.5em 0; }
   @media (prefers-color-scheme: dark) {
     body { background: #171614; color: #eee8dc; }
-    a { color: #ff8b6b; }
+    a { color: ${EXPORT_COLORS.linkDark}; }
+    blockquote { border-left-color: ${EXPORT_COLORS.accentDark}; }
     code { background: #2a2824; }
     pre { background: #101014; color: #f2f1ee; border-color: #3b3832; }
     .hljs-comment, .hljs-quote { color: #8b949e; }

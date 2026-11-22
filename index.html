@@ -9,13 +9,21 @@
       content="A fast, private Markdown parser that runs entirely in your browser."
     />
     <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f2f1ee" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0f0f11" media="(prefers-color-scheme: dark)" />
+    <link rel="apple-touch-icon" href="/pwa-192.png" />
     <title>Markdown Parser</title>
     <script>
       (() => {
         try {
           const storedTheme = localStorage.getItem('md-parser-theme');
           const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          document.documentElement.dataset.theme = storedTheme || (dark ? 'dark' : 'light');
+          document.documentElement.dataset.theme =
+            storedTheme === 'light' || storedTheme === 'dark'
+              ? storedTheme
+              : dark
+                ? 'dark'
+                : 'light';
 
           const rawSettings = localStorage.getItem('md-parser-settings');
           const settings = rawSettings ? JSON.parse(rawSettings) : {};
@@ -23,9 +31,16 @@
           document.documentElement.dataset.layout = layouts.includes(settings.layout)
             ? settings.layout
             : 'split';
+          document.documentElement.dataset.wrap = settings.wrap === false ? 'off' : 'on';
+          // On narrow screens the outline is a drawer; never open it on load.
+          const narrow = window.matchMedia('(max-width: 900px)').matches;
+          document.documentElement.dataset.outline =
+            settings.outline === true && !narrow ? 'on' : 'off';
         } catch {
           document.documentElement.dataset.theme = 'light';
           document.documentElement.dataset.layout = 'split';
+          document.documentElement.dataset.wrap = 'on';
+          document.documentElement.dataset.outline = 'off';
         }
       })();
     </script>
@@ -33,9 +48,21 @@
   <body>
     <header class="app-header">
       <a class="brand" href="/" aria-label="md-parser home">
-        <span class="brand-mark" aria-hidden="true">#</span>
+        <span class="brand-mark" aria-hidden="true">
+          <img src="/favicon.svg"/>
+        </span>
         <span class="brand-name">md-parser</span>
       </a>
+      <button
+        id="outline-toggle"
+        class="button button-quiet outline-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="outline-sidebar"
+        title="Toggle outline"
+      >
+        Outline
+      </button>
       <p class="tagline">Markdown, parsed locally.</p>
 
       <div class="header-actions">
@@ -45,21 +72,21 @@
             class="button button-accent"
             type="button"
             aria-expanded="false"
-            aria-haspopup="menu"
+            aria-controls="export-menu"
           >
             Export
           </button>
-          <div id="export-menu" class="popover menu-list" role="menu" aria-label="Export" hidden>
-            <button class="menu-item" type="button" role="menuitem" data-export="md">
+          <div id="export-menu" class="popover menu-list" aria-label="Export formats" hidden>
+            <button class="menu-item" type="button" data-export="md">
               <span>Markdown</span><span class="ext">.md</span>
             </button>
-            <button class="menu-item" type="button" role="menuitem" data-export="html">
+            <button class="menu-item" type="button" data-export="html">
               <span>HTML</span><span class="ext">.html</span>
             </button>
-            <button class="menu-item" type="button" role="menuitem" data-export="pdf">
+            <button class="menu-item" type="button" data-export="pdf">
               <span>PDF</span><span class="ext">.pdf</span>
             </button>
-            <button class="menu-item" type="button" role="menuitem" data-export="doc">
+            <button class="menu-item" type="button" data-export="doc">
               <span>Word document</span><span class="ext">.doc</span>
             </button>
           </div>
@@ -71,7 +98,7 @@
             class="button button-quiet"
             type="button"
             aria-expanded="false"
-            aria-haspopup="dialog"
+            aria-controls="settings-panel"
           >
             Settings
           </button>
@@ -119,15 +146,38 @@
                   <span class="switch-track" aria-hidden="true"></span>
                 </label>
               </div>
+              <div class="setting-row">
+                <span class="choice-text">
+                  <span class="setting-label">Keep line breaks</span>
+                  <span class="setting-hint">Off joins lines into paragraphs, like GitHub</span>
+                </span>
+                <label class="switch" aria-label="Keep line breaks">
+                  <input id="line-breaks" type="checkbox" />
+                  <span class="switch-track" aria-hidden="true"></span>
+                </label>
+              </div>
+              <div class="setting-row">
+                <span class="choice-text">
+                  <span class="setting-label">Wrap long lines</span>
+                  <span class="setting-hint">Line numbers show when off</span>
+                </span>
+                <label class="switch" aria-label="Wrap long lines">
+                  <input id="wrap-lines" type="checkbox" />
+                  <span class="switch-track" aria-hidden="true"></span>
+                </label>
+              </div>
             </div>
 
             <div class="setting-group">
               <p class="setting-heading">Theme</p>
               <div class="segmented" role="group" aria-label="Theme">
-                <button id="theme-light" class="segment" type="button" aria-pressed="false">
+                <button class="segment" type="button" data-theme-choice="system" aria-pressed="false">
+                  System
+                </button>
+                <button class="segment" type="button" data-theme-choice="light" aria-pressed="false">
                   Light
                 </button>
-                <button id="theme-dark" class="segment" type="button" aria-pressed="false">
+                <button class="segment" type="button" data-theme-choice="dark" aria-pressed="false">
                   Dark
                 </button>
               </div>
@@ -138,30 +188,47 @@
     </header>
 
     <main class="workspace">
+      <aside id="outline-sidebar" class="pane outline-sidebar" aria-labelledby="outline-title">
+        <div class="pane-header">
+          <h2 id="outline-title" class="pane-title">Outline</h2>
+          <button id="outline-close" class="button" type="button" aria-label="Hide outline">
+            Hide
+          </button>
+        </div>
+        <nav class="outline-nav" aria-labelledby="outline-title">
+          <ol id="outline-list" class="outline-list"></ol>
+        </nav>
+      </aside>
       <section class="pane editor-pane" aria-labelledby="editor-title">
         <div class="pane-header">
           <h1 id="editor-title" class="pane-title">Markdown</h1>
           <div class="pane-actions">
+            <button id="open-file" class="button" type="button">Open</button>
+            <input id="file-input" type="file" tabindex="-1" aria-hidden="true" hidden />
             <button id="load-sample" class="button" type="button">Sample</button>
             <button id="clear" class="button" type="button">Clear</button>
           </div>
         </div>
         <label class="sr-only" for="editor">Markdown source</label>
+        <p id="editor-help" class="sr-only">
+          Tab indents and Shift+Tab outdents. Press Escape, then Tab, to move focus out of the
+          editor. Ctrl+B bold, Ctrl+I italic, Ctrl+S downloads the Markdown file.
+        </p>
         <div class="editor-shell">
           <div id="line-numbers" class="line-numbers" aria-hidden="true">1</div>
           <textarea
             id="editor"
             class="editor"
+            aria-describedby="editor-help"
             spellcheck="false"
             autocomplete="off"
             autocapitalize="off"
-            wrap="off"
             placeholder="Type or paste Markdown here…"
           ></textarea>
         </div>
         <div class="pane-footer">
           <span id="stats" class="stats">0 words · 0 chars · ~0 B · 0 lines · 0 min read</span>
-          <span class="hint">Drop a .md file anywhere</span>
+          <span class="hint">Open or drop a .md file</span>
         </div>
       </section>
 
@@ -211,7 +278,7 @@
     </main>
 
     <footer class="app-footer">
-      <span>Private by design: nothing leaves your browser.</span>
+      <span>Private by design: your text never leaves your browser.</span>
       <a href="https://github.com/5imPliFication/md-parser" rel="noopener noreferrer">
         Source
       </a>
