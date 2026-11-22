@@ -116,3 +116,50 @@ describe('highlighted code safety', () => {
     expect(html).not.toContain('<script>');
   });
 });
+
+describe('renderMarkdown with source lines', () => {
+  const source = [
+    '# Title', // 0
+    '', // 1
+    'Paragraph one', // 2
+    'continues here.', // 3
+    '', // 4
+    '', // 5
+    '- a', // 6
+    '- b', // 7
+    '', // 8
+    '```ts', // 9
+    'const x = 1;', // 10
+    '```', // 11
+    '', // 12
+    '[ref]: https://example.com', // 13
+    '', // 14
+    'See [ref].', // 15
+  ].join('\n');
+
+  it('stamps each top-level block with its starting line', () => {
+    const html = renderMarkdown(source, { sourceLines: true });
+    const lines = [...html.matchAll(/<(\w+) data-source-line="(\d+)"/g)].map(
+      ([, tag, line]) => `${tag}:${line}`,
+    );
+
+    expect(lines).toEqual(['h1:0', 'p:2', 'ul:6', 'pre:9', 'p:15']);
+  });
+
+  it('renders the same document as the plain path apart from the markers', () => {
+    const marked = renderMarkdown(source, { sourceLines: true });
+    expect(marked.replace(/ data-source-line="\d+"/g, '')).toBe(renderMarkdown(source));
+  });
+
+  it('still resolves reference links and sanitizes HTML', () => {
+    const html = renderMarkdown(`${source}\n\n<img src=x onerror="alert(1)">`, {
+      sourceLines: true,
+    });
+    expect(html).toContain('href="https://example.com"');
+    expect(html).not.toContain('onerror');
+  });
+
+  it('leaves the plain output free of markers', () => {
+    expect(renderMarkdown(source)).not.toContain('data-source-line');
+  });
+});

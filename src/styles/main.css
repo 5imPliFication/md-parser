@@ -213,8 +213,8 @@ a {
 .tab:focus-visible,
 .segment:focus-visible,
 .menu-item:focus-visible,
-.choice:focus-within,
-.switch:focus-within {
+.choice:has(input:focus-visible),
+.switch:has(input:focus-visible) {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -598,6 +598,18 @@ html[data-layout="cinematic"] .preview-pane {
   tab-size: 2;
   white-space: pre;
   caret-color: var(--accent);
+}
+
+/* Soft wrap: lines wrap at the pane edge; the gutter is hidden because
+   logical line numbers can't line up with wrapped visual lines. */
+html[data-wrap="on"] .editor {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: hidden;
+}
+
+html[data-wrap="on"] .line-numbers {
+  display: none;
 }
 
 .editor::placeholder {
@@ -1018,6 +1030,40 @@ html[data-layout="cinematic"] .preview-pane {
 .toast.is-visible {
   opacity: 1;
   transform: translateY(0);
+}
+
+.toast.has-action {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-block: 6px;
+}
+
+.toast.is-visible.has-action {
+  pointer-events: auto;
+}
+
+.toast-action {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--accent);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.toast-action:hover {
+  background: var(--accent);
+  color: var(--invert-fg);
+}
+
+.toast-action:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
 }
 
 @media (max-width: 900px) {

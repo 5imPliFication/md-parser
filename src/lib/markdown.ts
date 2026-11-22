@@ -116,8 +116,41 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   }
 });
 
-export function renderMarkdown(source: string): string {
-  const raw = marked.parse(source, { async: false }) as string;
+/** Attribute marking the 0-based source line a rendered block starts on. */
+export const SOURCE_LINE_ATTR = 'data-source-line';
+
+const FIRST_OPEN_TAG = /^(\s*<[a-zA-Z][\w-]*)/;
+
+/**
+ * Renders top-level blocks one at a time (reference links are resolved at
+ * lex time, so this is equivalent to a whole-document parse) and stamps each
+ * block's first element with its starting source line, for scroll sync.
+ */
+function parseWithSourceLines(source: string): string {
+  const tokens = marked.lexer(source);
+  let line = 0;
+  let html = '';
+
+  for (const token of tokens) {
+    if (token.type !== 'space') {
+      const chunk = marked.parser([token]);
+      html += chunk.replace(FIRST_OPEN_TAG, `$1 ${SOURCE_LINE_ATTR}="${line}"`);
+    }
+    line += token.raw.split('\n').length - 1;
+  }
+
+  return html;
+}
+
+export interface RenderOptions {
+  /** Add `data-source-line` to top-level blocks (preview only; strip before export). */
+  sourceLines?: boolean;
+}
+
+export function renderMarkdown(source: string, options: RenderOptions = {}): string {
+  const raw = options.sourceLines
+    ? parseWithSourceLines(source)
+    : (marked.parse(source, { async: false }) as string);
 
   return DOMPurify.sanitize(raw, {
     USE_PROFILES: { html: true },

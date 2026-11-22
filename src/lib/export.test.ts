@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildDocHtml,
   buildStandaloneHtml,
+  EXPORT_COLORS,
   escapeHtml,
   getDocumentTitle,
   slugify,
@@ -81,5 +82,21 @@ describe('syntax styling in exports', () => {
 
     expect(html).toContain('.hljs-keyword');
     expect(html).toContain('.hljs-string');
+  });
+});
+
+describe('export colors', () => {
+  const OLD_ORANGE = /#c24024|#d94f30|#e75636|#ff8b6b/i;
+
+  it('uses the blue app accent instead of the old orange palette', () => {
+    for (const html of [buildStandaloneHtml('T', '<p>x</p>'), buildDocHtml('T', '<p>x</p>')]) {
+      expect(html).not.toMatch(OLD_ORANGE);
+      expect(html).toContain(EXPORT_COLORS.link);
+      expect(html).toContain(EXPORT_COLORS.accent);
+    }
+  });
+
+  it('gives the standalone page dark-mode accent colors', () => {
+    expect(buildStandaloneHtml('T', '')).toContain(EXPORT_COLORS.linkDark);
   });
 });

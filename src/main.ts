@@ -5,27 +5,34 @@ import {
   getDocumentTitle,
   slugify,
 } from './lib/export';
-import { renderMarkdown } from './lib/markdown';
+import { SOURCE_LINE_ATTR, renderMarkdown } from './lib/markdown';
+import type { ScrollMap } from './lib/scrollmap';
+import { buildScrollMap, invertScrollMap, mapScroll } from './lib/scrollmap';
 import { countLines, estimateSize } from './lib/stats';
 import { SAMPLE_MARKDOWN } from './data/sample';
+import type { Edit } from './lib/editing';
+import { continueList, indent, outdent, toggleWrap } from './lib/editing';
+import { FILE_ACCEPT, checkFile, looksBinary } from './lib/files';
 
 const DRAFT_KEY = 'md-parser-draft';
 const THEME_KEY = 'md-parser-theme';
 const SETTINGS_KEY = 'md-parser-settings';
-const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
 type View = 'preview' | 'html';
 type Layout = 'writing' | 'split' | 'cinematic';
 type Theme = 'light' | 'dark';
+type ThemeChoice = Theme | 'system';
 
 interface Settings {
   syncScroll: boolean;
   layout: Layout;
+  wrap: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
   syncScroll: true,
   layout: 'split',
+  wrap: true,
 };
 
 function required<T extends Element>(selector: string): T {
@@ -47,6 +54,8 @@ const dropOverlay = required<HTMLElement>('#drop-overlay');
 const tabPreview = required<HTMLButtonElement>('#tab-preview');
 const tabHtml = required<HTMLButtonElement>('#tab-html');
 const copyButton = required<HTMLButtonElement>('#copy-html');
+const openButton = required<HTMLButtonElement>('#open-file');
+const fileInput = required<HTMLInputElement>('#file-input');
 const sampleButton = required<HTMLButtonElement>('#load-sample');
 const clearButton = required<HTMLButtonElement>('#clear');
 const settingsToggle = required<HTMLButtonElement>('#settings-toggle');
@@ -54,8 +63,11 @@ const settingsPanel = required<HTMLElement>('#settings-panel');
 const exportToggle = required<HTMLButtonElement>('#export-toggle');
 const exportMenu = required<HTMLElement>('#export-menu');
 const syncScrollToggle = required<HTMLInputElement>('#sync-scroll');
-const themeLight = required<HTMLButtonElement>('#theme-light');
-const themeDark = required<HTMLButtonElement>('#theme-dark');
+const wrapToggle = required<HTMLInputElement>('#wrap-lines');
+const themeButtons = Array.from(
+  document.querySelectorAll<HTMLButtonElement>('[data-theme-choice]'),
+);
+const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
 const layoutInputs = Array.from(
   document.querySelectorAll<HTMLInputElement>('input[name="layout"]'),
 );
@@ -63,6 +75,7 @@ const layoutInputs = Array.from(
 let html = '';
 let view: View = 'preview';
 let settings = loadSettings();
+let themeChoice: ThemeChoice = 'system';
 let renderTimer: number | undefined;
 let saveTimer: number | undefined;
 let toastTimer: number | undefined;
@@ -100,6 +113,7 @@ function loadSettings(): Settings {
     return {
       syncScroll: parsed.syncScroll !== false,
       layout,
+      wrap: parsed.wrap !== false,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -112,13 +126,17 @@ function saveSettings(): void {
 
 function applySettings(persist = true): void {
   document.documentElement.dataset.layout = settings.layout;
+  document.documentElement.dataset.wrap = settings.wrap ? 'on' : 'off';
+  editor.wrap = settings.wrap ? 'soft' : 'off';
   syncScrollToggle.checked = settings.syncScroll;
+  wrapToggle.checked = settings.wrap;
 
   for (const input of layoutInputs) {
     input.checked = input.value === settings.layout;
   }
 
   scrollLock = null;
+  invalidateScrollMap();
 
   if (persist) {
     saveSettings();
@@ -154,9 +172,14 @@ function updateLineNumbers(source = editor.value): void {
   lineNumbers.scrollTop = editor.scrollTop;
 }
 
+const SOURCE_LINE_MARKER = new RegExp(`(<[a-zA-Z][\\w-]*) ${SOURCE_LINE_ATTR}="\\d+"`, 'g');
+
 function render(source: string): void {
-  html = renderMarkdown(source);
-  preview.innerHTML = html;
+  const previewHtml = renderMarkdown(source, { sourceLines: true });
+  preview.innerHTML = previewHtml;
+  // Copy/export get clean HTML without the scroll-sync markers.
+  html = previewHtml.replace(SOURCE_LINE_MARKER, '$1');
+  invalidateScrollMap();
   htmlCode.textContent = html || '<!-- Nothing to render yet -->';
   updateStats(source);
   updateLineNumbers(source);
@@ -172,11 +195,37 @@ function persistDraft(): void {
   saveTimer = window.setTimeout(() => safeSet(DRAFT_KEY, editor.value), 250);
 }
 
-function toast(message: string): void {
-  toastElement.textContent = message;
+interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
+function hideToast(): void {
+  window.clearTimeout(toastTimer);
+  toastElement.classList.remove('is-visible', 'has-action');
+}
+
+function toast(message: string, action?: ToastAction): void {
+  const text = document.createElement('span');
+  text.textContent = message;
+  toastElement.replaceChildren(text);
+  toastElement.classList.toggle('has-action', Boolean(action));
+
+  if (action) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'toast-action';
+    button.textContent = action.label;
+    button.addEventListener('click', () => {
+      hideToast();
+      action.run();
+    });
+    toastElement.append(button);
+  }
+
   toastElement.classList.add('is-visible');
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toastElement.classList.remove('is-visible'), 2200);
+  toastTimer = window.setTimeout(hideToast, action ? 6000 : 2200);
 }
 
 function setView(next: View): void {
@@ -191,21 +240,137 @@ function setView(next: View): void {
   tabHtml.setAttribute('aria-selected', String(!isPreview));
 
   if (isPreview) {
+    invalidateScrollMap();
     window.requestAnimationFrame(() => syncScroll(editor, preview));
   }
 }
 
-function currentTheme(): Theme {
-  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+function loadThemeChoice(): ThemeChoice {
+  const stored = safeGet(THEME_KEY);
+  return stored === 'light' || stored === 'dark' ? stored : 'system';
 }
 
-function applyTheme(theme: Theme): void {
-  document.documentElement.dataset.theme = theme;
-  safeSet(THEME_KEY, theme);
-  themeLight.classList.toggle('is-active', theme === 'light');
-  themeDark.classList.toggle('is-active', theme === 'dark');
-  themeLight.setAttribute('aria-pressed', String(theme === 'light'));
-  themeDark.setAttribute('aria-pressed', String(theme === 'dark'));
+function resolveTheme(choice: ThemeChoice): Theme {
+  if (choice !== 'system') return choice;
+  return systemDark.matches ? 'dark' : 'light';
+}
+
+/** Applies a theme choice; only an explicit click should persist it. */
+function applyTheme(choice: ThemeChoice, persist = false): void {
+  themeChoice = choice;
+  document.documentElement.dataset.theme = resolveTheme(choice);
+
+  if (persist) {
+    safeSet(THEME_KEY, choice);
+  }
+
+  for (const button of themeButtons) {
+    const active = button.dataset.themeChoice === choice;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
+  }
+}
+
+// Scroll sync maps positions block by block: each rendered block knows its
+// source line, so the editor and preview line up at every heading, code
+// block and image, not just proportionally. The map is rebuilt lazily after
+// anything that moves content (render, resize, wrap, images, <details>).
+let scrollMap: ScrollMap | null = null;
+
+function invalidateScrollMap(): void {
+  scrollMap = null;
+}
+
+function paddingTop(element: HTMLElement): number {
+  return parseFloat(getComputedStyle(element).paddingTop) || 0;
+}
+
+const MIRROR_STYLES = [
+  'boxSizing',
+  'paddingTop',
+  'paddingRight',
+  'paddingBottom',
+  'paddingLeft',
+  'fontFamily',
+  'fontSize',
+  'fontWeight',
+  'lineHeight',
+  'letterSpacing',
+  'tabSize',
+  'whiteSpace',
+  'overflowWrap',
+  'wordBreak',
+] as const;
+
+/** Top offset (content coordinates) of each given 0-based line in the editor. */
+function editorLineTops(lines: readonly number[]): number[] {
+  const style = getComputedStyle(editor);
+
+  if (!settings.wrap) {
+    const lineHeight = parseFloat(style.lineHeight) || 20;
+    return lines.map((line) => paddingTop(editor) + line * lineHeight);
+  }
+
+  // Wrapped lines have no fixed height, so measure in a hidden mirror that
+  // wraps exactly like the textarea, with a marker at each wanted line.
+  const mirror = document.createElement('div');
+  for (const name of MIRROR_STYLES) {
+    mirror.style[name] = style[name];
+  }
+  Object.assign(mirror.style, {
+    position: 'absolute',
+    visibility: 'hidden',
+    top: '0',
+    left: '-9999px',
+    width: `${editor.clientWidth}px`,
+    border: '0',
+  });
+
+  const wanted = new Set(lines);
+  const markers = new Map<number, HTMLElement>();
+  const sourceLines = editor.value.split('\n');
+  let pending = '';
+
+  sourceLines.forEach((text, index) => {
+    if (wanted.has(index)) {
+      mirror.append(pending);
+      pending = '';
+      const marker = document.createElement('span');
+      markers.set(index, marker);
+      mirror.append(marker);
+    }
+    pending += index < sourceLines.length - 1 ? `${text}\n` : text;
+  });
+  mirror.append(pending);
+
+  document.body.append(mirror);
+  const tops = lines.map((line) => markers.get(line)?.offsetTop ?? 0);
+  mirror.remove();
+  return tops;
+}
+
+function getScrollMap(): ScrollMap {
+  if (scrollMap) return scrollMap;
+
+  const blocks = Array.from(preview.querySelectorAll<HTMLElement>(`[${SOURCE_LINE_ATTR}]`));
+  const lines = blocks.map((block) => Number(block.getAttribute(SOURCE_LINE_ATTR)));
+  const previewTop = preview.getBoundingClientRect().top - preview.scrollTop;
+  const previewPad = paddingTop(preview);
+  const editorPad = paddingTop(editor);
+
+  // Scroll positions that put each block / its source line at the top edge.
+  const previewAnchors = blocks.map(
+    (block) => block.getBoundingClientRect().top - previewTop - previewPad,
+  );
+  const editorAnchors = editorLineTops(lines).map((top) => top - editorPad);
+
+  scrollMap = buildScrollMap(
+    editorAnchors,
+    previewAnchors,
+    editor.scrollHeight - editor.clientHeight,
+    preview.scrollHeight - preview.clientHeight,
+  );
+  return scrollMap;
 }
 
 function syncScroll(source: HTMLElement, target: HTMLElement): void {
@@ -219,12 +384,11 @@ function syncScroll(source: HTMLElement, target: HTMLElement): void {
 
   scrollLock = source;
 
-  const sourceMax = source.scrollHeight - source.clientHeight;
-  const targetMax = target.scrollHeight - target.clientHeight;
-
-  if (sourceMax > 0 && targetMax > 0) {
-    target.scrollTop = (source.scrollTop / sourceMax) * targetMax;
-  }
+  const map = getScrollMap();
+  target.scrollTop = mapScroll(
+    source.scrollTop,
+    source === editor ? map : invertScrollMap(map),
+  );
 
   if (target === editor) {
     lineNumbers.scrollTop = editor.scrollTop;
@@ -353,13 +517,98 @@ function togglePopover(button: HTMLButtonElement, panel: HTMLElement): void {
   if (shouldOpen) {
     panel.hidden = false;
     button.setAttribute('aria-expanded', 'true');
+    // Move focus into the panel: the selected option if there is one.
+    panel
+      .querySelector<HTMLElement>('input:checked, button, input')
+      ?.focus();
   }
 }
 
-function loadSource(source: string): void {
-  editor.value = source;
+/** Closes an open popover and returns focus to its toggle button. */
+function dismissPopover(): boolean {
+  const open = [
+    { button: settingsToggle, panel: settingsPanel },
+    { button: exportToggle, panel: exportMenu },
+  ].find(({ panel }) => !panel.hidden);
+
+  if (!open) return false;
+
+  closePopovers();
+  open.button.focus();
+  return true;
+}
+
+function setSource(source: string): void {
+  // Replace the text as an edit (not by assigning .value) so the textarea's
+  // own undo history survives and Ctrl+Z can bring the old draft back.
+  editor.focus();
+  editor.select();
+  const edited =
+    source === ''
+      ? document.execCommand('delete')
+      : document.execCommand('insertText', false, source);
+
+  if (!edited || editor.value !== source) {
+    editor.value = source;
+  }
+
+  editor.setSelectionRange(0, 0);
+  editor.scrollTop = 0;
+  window.clearTimeout(renderTimer);
+  window.clearTimeout(saveTimer);
   render(source);
   safeSet(DRAFT_KEY, source);
+}
+
+/** Replaces the whole draft, offering Undo when non-empty work would be lost. */
+function replaceSource(source: string, message: string): void {
+  const previous = editor.value;
+  if (previous === source) {
+    toast(message);
+    return;
+  }
+
+  setSource(source);
+
+  if (!previous.trim()) {
+    toast(message);
+    return;
+  }
+
+  toast(message, {
+    label: 'Undo',
+    run: () => {
+      setSource(previous);
+      toast('Restored previous draft');
+    },
+  });
+}
+
+async function openFile(file: File): Promise<void> {
+  const check = checkFile(file);
+  if (!check.ok) {
+    toast(
+      check.reason === 'size'
+        ? 'File is too large (2 MB maximum)'
+        : `${file.name} is not a Markdown or text file`,
+    );
+    return;
+  }
+
+  let content: string;
+  try {
+    content = await file.text();
+  } catch {
+    toast('Could not read that file');
+    return;
+  }
+
+  if (looksBinary(content)) {
+    toast(`${file.name} is not a Markdown or text file`);
+    return;
+  }
+
+  replaceSource(content, `Opened ${file.name}`);
 }
 
 function hasFiles(event: DragEvent): boolean {
@@ -392,10 +641,33 @@ document.addEventListener('click', (event) => {
   closePopovers();
 });
 
+// Tabbing out of an open popover closes that popover (only that one, so
+// moving focus into another menu's freshly opened panel keeps it open).
+for (const { button, panel } of [
+  { button: settingsToggle, panel: settingsPanel },
+  { button: exportToggle, panel: exportMenu },
+]) {
+  const menu = button.closest<HTMLElement>('.menu');
+  menu?.addEventListener('focusout', (event) => {
+    const next = event.relatedTarget;
+    if (!panel.hidden && next instanceof Node && !menu.contains(next)) {
+      panel.hidden = true;
+      button.setAttribute('aria-expanded', 'false');
+    }
+  });
+}
+
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') {
-    closePopovers();
+  if (event.key === 'Escape' && dismissPopover()) {
+    event.preventDefault();
   }
+});
+
+wrapToggle.addEventListener('change', () => {
+  settings.wrap = wrapToggle.checked;
+  applySettings();
+  updateLineNumbers();
+  toast(settings.wrap ? 'Line wrap on' : 'Line wrap off');
 });
 
 syncScrollToggle.addEventListener('change', () => {
@@ -419,8 +691,91 @@ for (const input of layoutInputs) {
   });
 }
 
-themeLight.addEventListener('click', () => applyTheme('light'));
-themeDark.addEventListener('click', () => applyTheme('dark'));
+for (const button of themeButtons) {
+  button.addEventListener('click', () => {
+    applyTheme(button.dataset.themeChoice as ThemeChoice, true);
+  });
+}
+
+systemDark.addEventListener('change', () => {
+  if (themeChoice === 'system') {
+    applyTheme('system');
+  }
+});
+
+/** Applies an edit as a native one so it lands in the textarea's undo stack. */
+function applyEdit(edit: Edit): void {
+  editor.setSelectionRange(edit.start, edit.end);
+  let edited = true;
+
+  if (edit.text) {
+    edited = document.execCommand('insertText', false, edit.text);
+  } else if (edit.start !== edit.end) {
+    edited = document.execCommand('delete');
+  }
+
+  if (!edited) {
+    editor.setRangeText(edit.text, edit.start, edit.end);
+    editor.dispatchEvent(new Event('input'));
+  }
+
+  editor.setSelectionRange(edit.selectionStart, edit.selectionEnd);
+}
+
+// After Escape, the next Tab moves focus out of the editor instead of
+// indenting, so keyboard users are never trapped in the textarea.
+let tabReleased = false;
+
+editor.addEventListener('keydown', (event) => {
+  if (event.isComposing) return;
+
+  const { value, selectionStart: start, selectionEnd: end } = editor;
+  const mod = event.ctrlKey || event.metaKey;
+  let edit: Edit | null = null;
+  let handled = false;
+
+  if (event.key === 'Escape') {
+    tabReleased = true;
+    return;
+  }
+
+  if (event.key === 'Tab' && !mod && !event.altKey) {
+    if (tabReleased) {
+      tabReleased = false;
+      return;
+    }
+    edit = event.shiftKey ? outdent(value, start, end) : indent(value, start, end);
+    handled = true;
+  } else if (event.key === 'Enter' && !mod && !event.shiftKey && !event.altKey) {
+    edit = continueList(value, start, end);
+    handled = edit !== null;
+  } else if (mod && !event.altKey && !event.shiftKey) {
+    const key = event.key.toLowerCase();
+    if (key === 'b' || key === 'i') {
+      edit = toggleWrap(value, start, end, key === 'b' ? '**' : '*');
+      handled = true;
+    }
+  }
+
+  tabReleased = false;
+
+  if (handled) {
+    event.preventDefault();
+    if (edit) applyEdit(edit);
+  }
+});
+
+document.addEventListener('keydown', (event) => {
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    !event.altKey &&
+    !event.shiftKey &&
+    event.key.toLowerCase() === 's'
+  ) {
+    event.preventDefault();
+    exportMarkdown();
+  }
+});
 
 editor.addEventListener('input', () => {
   updateLineNumbers();
@@ -437,6 +792,13 @@ editor.addEventListener(
   { passive: true },
 );
 preview.addEventListener('scroll', () => syncScroll(preview, editor), { passive: true });
+
+// Anything that changes where content sits invalidates the scroll map.
+new ResizeObserver(invalidateScrollMap).observe(editor);
+new ResizeObserver(invalidateScrollMap).observe(preview);
+preview.addEventListener('load', invalidateScrollMap, true);
+preview.addEventListener('toggle', invalidateScrollMap, true);
+void document.fonts?.ready.then(invalidateScrollMap);
 
 tabPreview.addEventListener('click', () => setView('preview'));
 tabHtml.addEventListener('click', () => setView('html'));
@@ -476,14 +838,11 @@ exportMenu.addEventListener('click', (event) => {
 });
 
 sampleButton.addEventListener('click', () => {
-  loadSource(SAMPLE_MARKDOWN);
-  editor.focus();
-  toast('Sample loaded');
+  replaceSource(SAMPLE_MARKDOWN, 'Sample loaded');
 });
 
 clearButton.addEventListener('click', () => {
-  loadSource('');
-  editor.focus();
+  replaceSource('', 'Draft cleared');
 });
 
 window.addEventListener('dragover', (event) => {
@@ -504,20 +863,70 @@ window.addEventListener('drop', async (event) => {
   hideDropOverlay();
 
   const file = event.dataTransfer?.files[0];
-  if (!file) return;
+  if (file) {
+    await openFile(file);
+  }
+});
 
-  if (file.size > MAX_FILE_BYTES) {
-    toast('File is too large (2 MB maximum)');
+fileInput.accept = FILE_ACCEPT;
+
+openButton.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', async () => {
+  const file = fileInput.files?.[0];
+  // Reset so picking the same file again still fires "change".
+  fileInput.value = '';
+  if (file) {
+    await openFile(file);
+  }
+});
+
+// Keep tabs in step. Theme and settings follow silently; a draft edited in
+// another tab is offered (not forced) so typing here is never overwritten.
+let externalDraft: string | null = null;
+let externalDraftOffered = false;
+
+function offerExternalDraft(): void {
+  if (externalDraft === null || externalDraftOffered) return;
+  if (document.visibilityState !== 'visible') return;
+  if (externalDraft === editor.value) {
+    externalDraft = null;
     return;
   }
 
-  try {
-    loadSource(await file.text());
-    toast(`Opened ${file.name}`);
-  } catch {
-    toast('Could not read that file');
+  externalDraftOffered = true;
+
+  toast('Draft changed in another tab', {
+    label: 'Load',
+    run: () => {
+      if (externalDraft !== null) {
+        replaceSource(externalDraft, 'Loaded draft from other tab');
+      }
+      externalDraft = null;
+    },
+  });
+}
+
+window.addEventListener('storage', (event) => {
+  if (event.storageArea !== localStorage) return;
+
+  if (event.key === THEME_KEY || event.key === null) {
+    applyTheme(loadThemeChoice());
+  }
+
+  if (event.key === SETTINGS_KEY || event.key === null) {
+    settings = loadSettings();
+    applySettings(false);
+  }
+
+  if (event.key === DRAFT_KEY && event.newValue !== null) {
+    externalDraft = event.newValue;
+    externalDraftOffered = false;
+    offerExternalDraft();
   }
 });
+
+document.addEventListener('visibilitychange', offerExternalDraft);
 
 // Collapsed <details> would print only their summary, so expand them for the
 // print (Export → PDF or Ctrl+P) and restore the reader's state afterwards.
@@ -545,5 +954,5 @@ const initial = initialSource !== null ? initialSource : SAMPLE_MARKDOWN;
 editor.value = initial;
 render(initial);
 applySettings(false);
-applyTheme(currentTheme());
+applyTheme(loadThemeChoice());
 setView('preview');

@@ -7,14 +7,15 @@ A fast, private Markdown parser that runs entirely in your browser. Paste or dro
 - GitHub Flavored Markdown via `marked` (tables, task lists, strikethrough, autolinks)
 - Syntax highlighting for Java, JavaScript, TypeScript, Python, Bash, HTML, CSS, C, C++, C#, and Go
 - HTML sanitized with `dompurify` before it reaches the preview
-- Line-numbered editor with an approximate UTF-8 file size alongside word, line, and reading-time stats
+- Editor keys: Tab/Shift+Tab indent and nest list items, Enter continues lists, Ctrl/Cmd+B and +I toggle bold/italic, Ctrl/Cmd+S downloads the `.md` (Escape then Tab leaves the editor)
+- Soft-wrapping editor (toggle off to get a line-number gutter) with an approximate UTF-8 file size alongside word, line, and reading-time stats
 - Writing, split preview, and cinematic view modes
-- Toggleable synchronized scrolling between editor and preview
+- Toggleable synchronized scrolling, anchored per block (headings, code, images stay aligned instead of drifting)
 - Export as Markdown, HTML, PDF, or Word (`.doc`); PDF uses the browser's print dialog ("Save as PDF") with a light, paginated print stylesheet, so text stays selectable and links keep working
 - HTML source view and clipboard copy
-- Drag-and-drop `.md` file loading (2 MB limit)
+- Open or drag-and-drop Markdown/text files (2 MB limit); binary files are rejected, and replacing the draft can be undone
 - Local draft and settings persistence via `localStorage`
-- Light and dark themes, responsive flat design, print styles
+- Light, dark, and system-following themes, responsive flat design, print styles
 
 ## Development
 
@@ -46,6 +47,9 @@ npx vitest run -t "removes script tags"
 | `src/lib/markdown.ts` | `marked` + `highlight.js` rendering and `dompurify` sanitization |
 | `src/lib/export.ts` | Title extraction, slugification, standalone HTML and Word `.doc` builders |
 | `src/lib/stats.ts` | Line counting and approximate UTF-8 file size |
+| `src/lib/files.ts` | File-type and size checks for opened/dropped files, file-picker `accept` list |
+| `src/lib/editing.ts` | Pure text transforms for editor keys: indent/outdent, bold/italic toggles, list continuation |
+| `src/lib/scrollmap.ts` | Piecewise-linear editor ↔ preview scroll mapping between block anchors |
 | `src/data/sample.ts` | Sample document shown on first visit |
 | `src/styles/main.css` | Application theme and Markdown preview styles |
 | `src/lib/*.test.ts` | Vitest unit tests |
